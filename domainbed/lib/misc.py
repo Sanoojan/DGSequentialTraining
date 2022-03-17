@@ -203,9 +203,6 @@ def confusionMatrix(network, loader, weights, device,output_dir,env_name,algo_na
             pred=p.argmax(1)
             y_true=y_true+y.to("cpu").numpy().tolist()
             y_pred=y_pred+pred.to("cpu").numpy().tolist()
-            # print(y_true)
-            # print("hashf")
-            # print(y_pred)
             if weights is None:
                 batch_weights = torch.ones(len(x))
             else:
@@ -213,10 +210,8 @@ def confusionMatrix(network, loader, weights, device,output_dir,env_name,algo_na
                 weights_offset += len(x)
             batch_weights = batch_weights.to(device)
             if p.size(1) == 1:
-                # if p.size(1) == 1:
                 correct += (p.gt(0).eq(y).float() * batch_weights.view(-1, 1)).sum().item()
             else:
-                # print('p hai ye', p.size(1))
                 correct += (p.argmax(1).eq(y).float() * batch_weights).sum().item()
             total += batch_weights.sum().item()
     print(confusion_matrix(y_true, y_pred))
@@ -224,8 +219,7 @@ def confusionMatrix(network, loader, weights, device,output_dir,env_name,algo_na
     return correct / total
 
 def plot_block_accuracy2(network, loader, weights, device,output_dir,env_name,algo_name):
-    
-    # print(network)
+
     
     if algo_name is None:
         algo_name=type(network).__name__
@@ -251,10 +245,8 @@ def plot_block_accuracy2(network, loader, weights, device,output_dir,env_name,al
                     weights_offset[count] += len(x)
                 batch_weights = batch_weights.to(device)
                 if p.size(1) == 1:
-                    # if p.size(1) == 1:
                     correct[count] += (p.gt(0).eq(y).float() * batch_weights.view(-1, 1)).sum().item()
                 else:
-                    # print('p hai ye', p.size(1))
                     correct[count] += (p.argmax(1).eq(y).float() * batch_weights).sum().item()
                 total[count] += batch_weights.sum().item()
 

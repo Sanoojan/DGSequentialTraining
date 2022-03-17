@@ -26,7 +26,7 @@ do
         do
             CUDA_VISIBLE_DEVICES=3 python -m domainbed.scripts.test_pretrained_models \
                 --algorithm Testing\
-                --pretrained "/home/computervision1/Sanoojan/DomainBedS/domainbed/outputs/${fold}/${testdom}_${trial}/model.pkl"\
+                --pretrained "/home/computervision1/Sanoojan/DGST/domainbed/outputs/${fold}/${testdom}_${trial}/model.pkl"\
                 --data_dir /home/computervision1/DG_new_idea/domainbed/data \
                 --dataset PACS\
                 --holdout_fraction 0.2\
