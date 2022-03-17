@@ -178,9 +178,10 @@ if __name__ == "__main__":
         for i in range(len(uda_splits))]
 
     algorithm_class = algorithms.get_algorithm_class(args.algorithm)
+    queue_var.current_test_env=args.test_envs
     algorithm = algorithm_class(dataset.input_shape, dataset.num_classes,
         len(dataset) - len(args.test_envs), hparams)
-
+    
     if algorithm_dict is not None:
         algorithm.load_state_dict(algorithm_dict)
 
@@ -286,7 +287,7 @@ if __name__ == "__main__":
             for id_d in range(len(minibatches_device)):
                 print('Queue (class ',id_c,', domain ',id_d,') : ',queue_var.train_queues[id_c][id_d].size())
 
-        ################################ Code required for CorrespondenceSelfCross ################################
+        ################################ Code required for Loading Data Classwise ################################
 
 
 

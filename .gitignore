@@ -18,3 +18,4 @@ domainbed/pretrained/cvt/CvT-13-224x224-IN-1k.pth
 domainbed/image_outputs/
 *.out
 
+domainbed/pretrained/
