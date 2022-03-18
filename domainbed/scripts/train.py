@@ -347,7 +347,7 @@ if __name__ == "__main__":
                 if(val_acc>=best_val_acc):
                     model_save=copy.deepcopy(algorithm)  #clone
                     best_val_acc=val_acc
-                    savename= 'best_val_model_testdom_'+args.test_envs+"_{:.4f}".format(val_acc)+'.pkl'
+                    savename= 'best_val_model_testdom_'+str(args.test_envs)+"_{:.4f}".format(val_acc)+'.pkl'
                     print("Best model upto now")
                     
             results.update({

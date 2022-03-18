@@ -119,13 +119,11 @@ class MultiDomainDistillation(Algorithm):
                                   hparams)
        
         self.num_domains=num_domains
-        load_model_path='domainbed/pretrained/single_train_models/DeitSmall/2f564cbde0093378552ac5c29dad5a0a/best_val_model_valdom_1_0.9701.pkl' #should not be the test model
+        load_model_path='domainbed/pretrained/single_train_models/DeitSmall/820147d8f3bc2473e6b839f2e4fb0f2e/best_val_model_valdom_2_0.9940.pkl' #should not be the test model
         deit_trained_dgbed=load_model(load_model_path)
         self.network=MCVisionTransformer(img_size=224,num_classes=num_classes, distilled=False,patch_size=16, embed_dim=384, depth=12, num_heads=6,num_cls_emb=num_domains)
         self.network.load_state_dict(deit_trained_dgbed.network.state_dict(),strict=False) 
         printNetworkParams(self.network)
-        # img = torch.randn(10, 3, 224, 224)
-        # out=self.network(img)
         self.optimizer = torch.optim.Adam(
             self.network.parameters(),
             lr=self.hparams["lr"],
@@ -138,7 +136,7 @@ class MultiDomainDistillation(Algorithm):
         for _ in test_envs:
             del teachers[test_envs[-1]]  # Deleting test environment models
         assert len(teachers)==num_domains ,"Required number of teacher pretrained models not given"
-        self.Teachnetwork=[load_model(fname) for fname in teachers]
+        self.Teachnetwork=[load_model(fname).to("cuda") for fname in teachers]
     
 
     def update(self, minibatches, unlabeled=None):
@@ -170,7 +168,7 @@ class MultiDomainDistillation(Algorithm):
     def predictTrain(self, x):
         return self.network(x)
     def predictTeacher(self,net, x):
-        return net(x)
+        return net.predict(x)
 
 class DeitSmall(Algorithm):
     """
