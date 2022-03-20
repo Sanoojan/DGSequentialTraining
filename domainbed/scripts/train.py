@@ -223,7 +223,7 @@ if __name__ == "__main__":
         torch.save(save_dict, os.path.join(args.output_dir, filename))
 
     ################################ Code required for Loading Data Classwise ################################
-    if args.algorithm in ('CrossImageVIT','DeitSmall_StrongTeachers') : # Queue computations 
+    if args.algorithm in ('DeitSmall_StrongTeachers') : # Queue computations 
         print('Firstly, computing Queues for the algorithm: ',args.algorithm,",pls wait....")
         queue_sz = hparams['batch_size'] # the memory module/ queue size
         minibatches_device = [(x.to(device), y.to(device))
@@ -322,8 +322,7 @@ if __name__ == "__main__":
             temp_acc=0
             temp_count=0
             for name, loader, weights in evals:
-                
-                # print("name:",name,"******************************************")
+
                 acc = misc.accuracy(algorithm, loader, weights, device)
                 if(args.save_best_model):
                     if (int(name[3]) not in args.test_envs and  "out" in name):
