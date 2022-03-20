@@ -40,7 +40,8 @@ ALGORITHMS = [
     'DeitSmall',
     'DeitTiny',
     'CVTTiny',
-    'CrossImageVIT'
+    'CrossImageVIT',
+    'DeitSmall_StrongTeachers'
 ]
 
 def get_algorithm_class(algorithm_name):
@@ -184,7 +185,7 @@ class MultiDomainDistillation_NoKL(Algorithm):
                                   hparams)
        
         self.num_domains=num_domains
-        load_model_path='/home/computervision1/Sanoojan/DGST/domainbed/pretrained/single_train_models/DeitSmall/2f564cbde0093378552ac5c29dad5a0a/best_val_model_valdom_1_0.9701.pkl' #should not be the test model
+        load_model_path='domainbed/pretrained/single_train_models/DeitSmall/820147d8f3bc2473e6b839f2e4fb0f2e/best_val_model_valdom_2_0.9940.pkl' #should not be the test model
         deit_trained_dgbed=load_model(load_model_path)
         self.network=MCVisionTransformer(img_size=224,num_classes=num_classes, distilled=False,patch_size=16, embed_dim=384, depth=12, num_heads=6,num_cls_emb=num_domains)
         self.network.load_state_dict(deit_trained_dgbed.network.state_dict(),strict=False) 
@@ -215,7 +216,8 @@ class MultiDomainDistillation_NoKL(Algorithm):
 
        
     def predict(self, x):
-        return torch.sum(self.network(x),1)
+        return self.network(x)[:,2]
+        # return torch.sum(self.network(x),1)
     def predictTrain(self, x):
         return self.network(x)
 
@@ -232,7 +234,7 @@ class DeitSmall(Algorithm):
         self.network=deit_small_patch16_224(pretrained=True) 
         self.network.head = nn.Linear(384, num_classes)
         # self.network.head_dist = nn.Linear(384, num_classes)  # reinitialize the last layer for distillation
-  
+        
         self.optimizer = torch.optim.AdamW(
             self.network.parameters(),
             lr=self.hparams["lr"],
@@ -251,6 +253,89 @@ class DeitSmall(Algorithm):
         return {'loss': loss.item()}
     def predict(self, x):
         return self.network(x)
+
+class DeitSmall_StrongTeachers(Algorithm):
+    """
+    Empirical Risk Minimization with Deit (Deit-small)
+    """
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(DeitSmall_StrongTeachers, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+        
+        self.network=deit_small_distilled_patch16_224(pretrained=True) 
+        self.network.head = nn.Linear(384, num_classes)
+        self.network.head_dist = nn.Linear(384, num_classes)  # reinitialize the last layer for distillation
+        teachers=['domainbed/pretrained/single_train_models/ERM/c52ccf0a2ff8fcb27e5f0c637efb5f90/best_val_model_valdom_0_0.9511.pkl','domainbed/pretrained/single_train_models/ERM/c62da0be82f89501d09e0a0e8fd65200/best_val_model_valdom_1_0.9744.pkl','domainbed/pretrained/single_train_models/ERM/cde183b2a672bd049e697054ef75e988/best_val_model_valdom_2_0.9940.pkl','domainbed/pretrained/single_train_models/ERM/6d29d7ebbbc85f0d744e924bb602d5ad/best_val_model_valdom_3_0.9720.pkl']
+        test_envs=queue_var.current_test_env
+        test_envs.sort()
+        for _ in test_envs:
+            del teachers[test_envs[-1]]  # Deleting test environment models
+        assert len(teachers)==num_domains ,"Required number of teacher pretrained models not given"
+        self.Teachnetwork=[load_model(fname).to("cuda") for fname in teachers]
+        self.optimizer = torch.optim.AdamW(
+            self.network.parameters(),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.temp=self.hparams['temp']
+        self.Wd=self.hparams['Wd']
+    def update(self, minibatches, unlabeled=None):
+        train_queues = queue_var.train_queues
+        nclass=len(train_queues)
+        ndomains=len(train_queues[0])
+        for id_c in range(nclass): # loop over classes
+            for id_d in range(ndomains): # loop over domains
+                mb_ids=(minibatches[id_d][1] == id_c).nonzero(as_tuple=True)[0]
+                # indices of those egs from domain id_d, whose class label is id_c
+                if mb_ids.size(0)==0:
+                    continue
+                data_tensor=minibatches[id_d][0][mb_ids] # data
+                data_tensor = data_tensor.detach()
+                # update queue for this class and this domain
+                current_queue = train_queues[id_c][id_d]
+                current_queue = torch.cat((current_queue, data_tensor), 0)
+                current_queue = current_queue[-queue_sz:] # keep only the last queue_sz entries
+                train_queues[id_c][id_d] = current_queue
+ 
+        cross_learning_data=[]  
+        cross_learning_labels=[]
+        for dom_n in range(ndomains):
+            for i in range(queue_sz) :
+                for cls in range(nclass):
+                    cross_learning_data.append(train_queues[cls][dom_n][i])
+                    cross_learning_labels.append(cls)
+
+        cross_learning_data=torch.stack(cross_learning_data)
+        cross_learning_labels=torch.tensor(cross_learning_labels).to("cuda")
+
+        pred,dist=self.predict(cross_learning_data)
+
+        dist=torch.chunk(dist,ndomains,dim=0) 
+        loss = F.cross_entropy(pred, cross_learning_labels)
+        Wd=self.Wd
+        t=self.temp
+        cross_learning_data=torch.chunk(cross_learning_data,ndomains,dim=0)
+        for dom in range(ndomains):
+            divLs= Wd* F.kl_div(
+                F.log_softmax(dist[dom] / t, dim=1),
+                F.log_softmax(self.predictTeacher(self.Teachnetwork[dom],cross_learning_data[dom]) / t, dim=1),
+                reduction='sum',
+                log_target=True
+            ) * (t * t) / dist[dom].numel()
+            loss +=  divLs
+      
+
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        return self.network(x)
+    def predictTeacher(self,net, x):
+        return net.predict(x)
    
 class DeitTiny(ERM):
     """
