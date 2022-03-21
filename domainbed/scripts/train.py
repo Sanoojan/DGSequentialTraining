@@ -322,8 +322,7 @@ if __name__ == "__main__":
             temp_acc=0
             temp_count=0
             for name, loader, weights in evals:
-                
-                # print("name:",name,"******************************************")
+
                 acc = misc.accuracy(algorithm, loader, weights, device)
                 if(args.save_best_model):
                     if (int(name[3]) not in args.test_envs and  "out" in name):

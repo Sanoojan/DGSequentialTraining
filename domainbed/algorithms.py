@@ -282,22 +282,9 @@ class DeitSmall_StrongTeachers(Algorithm):
         self.temp=self.hparams['temp']
         self.Wd=self.hparams['Wd']
     def update(self, minibatches, unlabeled=None):
-        train_queues = queue_var.train_queues
+        train_queues=UpdateClsTrainQueues(minibatches) # Load data class wise
         nclass=len(train_queues)
         ndomains=len(train_queues[0])
-        for id_c in range(nclass): # loop over classes
-            for id_d in range(ndomains): # loop over domains
-                mb_ids=(minibatches[id_d][1] == id_c).nonzero(as_tuple=True)[0]
-                # indices of those egs from domain id_d, whose class label is id_c
-                if mb_ids.size(0)==0:
-                    continue
-                data_tensor=minibatches[id_d][0][mb_ids] # data
-                data_tensor = data_tensor.detach()
-                # update queue for this class and this domain
-                current_queue = train_queues[id_c][id_d]
-                current_queue = torch.cat((current_queue, data_tensor), 0)
-                current_queue = current_queue[-queue_sz:] # keep only the last queue_sz entries
-                train_queues[id_c][id_d] = current_queue
  
         cross_learning_data=[]  
         cross_learning_labels=[]
@@ -450,9 +437,7 @@ class CVTSmall(Algorithm):
     def __init__(self, input_shape, num_classes, num_domains, hparams):
         super(CVTSmall, self).__init__(input_shape, num_classes, num_domains,
                                   hparams)
-                    
-        # self.network = torch.hub.load('/home/computervision1/Sanoojan/DomainBedS/deit',
-        #                               'deit_Tiny_patch16_224', pretrained=True, source='local')    
+                      
         self.network=small_cvt(pretrained=False) 
         self.network.head = nn.Linear(384, num_classes)
         # self.network.head_dist = nn.Linear(384, num_classes)  # reinitialize the last layer for distillation
@@ -486,11 +471,8 @@ class CVTTiny(Algorithm):
     def __init__(self, input_shape, num_classes, num_domains, hparams):
         super(CVTTiny, self).__init__(input_shape, num_classes, num_domains,
                                   hparams)
-                    
-        # self.network = torch.hub.load('/home/computervision1/Sanoojan/DomainBedS/deit',
-        #                               'deit_Tiny_patch16_224', pretrained=True, source='local')    
+         
         self.network=tiny_cvt(pretrained=False) 
-        # print(self.network)
         self.network.head = nn.Linear(384, num_classes)
         # self.network.head_dist = nn.Linear(384, num_classes)  # reinitialize the last layer for distillation
   
@@ -513,82 +495,6 @@ class CVTTiny(Algorithm):
         return {'loss': loss.item()}
     def predict(self, x):
         return self.network(x)[-1]
-
-class CrossImageVIT(Algorithm):
-    """
-    Empirical Risk Minimization with Deit (Deit-small)
-    """
-
-    def __init__(self, input_shape, num_classes, num_domains, hparams):
-        super(CrossImageVIT, self).__init__(input_shape, num_classes, num_domains,
-                                  hparams)
-        self.countersave=0   
-        self.saveSamples=False       
-        self.num_domains=num_domains
-
-        self.network_deit=deit_small_patch16_224(pretrained=True) 
-        self.network_deit.head = nn.Linear(384, num_classes)
-        printNetworkParams(self.network_deit)
-        self.network=CrossVisionTransformer(img_size=224, patch_size=16, in_chans=3, num_classes=num_classes, embed_dim=384, depth=1,
-            im_enc_depth=12,cross_attn_depth=3,num_heads=6, representation_size=None, distilled=False,
-            drop_rate=0., norm_layer=None, weight_init='',cross_attn_heads = 6,cross_attn_dim_head = 64,dropout = 0.1,im_enc_mlp_dim=1536,im_enc_dim_head=64,skipconnection=True)
-        printNetworkParams(self.network)
-        self.network.load_state_dict(self.network_deit.state_dict(),strict=False)
-        self.network.blocks[0].load_state_dict(self.network_deit.state_dict(),strict=False)
-        self.optimizer = torch.optim.AdamW(
-            self.network.parameters(),
-            lr=self.hparams["lr"],
-            weight_decay=self.hparams['weight_decay']
-        )
-    def update(self, minibatches, unlabeled=None):
-
-        train_queues = queue_var.train_queues
-        nclass=len(train_queues)
-        ndomains=len(train_queues[0])
-        for id_c in range(nclass): # loop over classes
-            for id_d in range(ndomains): # loop over domains
-                mb_ids=(minibatches[id_d][1] == id_c).nonzero(as_tuple=True)[0]
-                # indices of those egs from domain id_d, whose class label is id_c
-                label_tensor=minibatches[id_d][1][mb_ids] # labels
-                if mb_ids.size(0)==0:
-                    #print('class has no element')
-                    continue
-                data_tensor=minibatches[id_d][0][mb_ids] # data
-                data_tensor = data_tensor.detach()
-                
-                # update queue for this class and this domain
-                current_queue = train_queues[id_c][id_d]
-                current_queue = torch.cat((current_queue, data_tensor), 0)
-                current_queue = current_queue[-queue_sz:] # keep only the last queue_sz entries
-                train_queues[id_c][id_d] = current_queue
-                # all_labels+=label_tensor
-        cross_learning_data=[[] for i in range(ndomains)]  
-        cross_learning_labels=[]
-        for cls in range(nclass):
-            for i in range(queue_sz) :
-                for dom_n in range(ndomains):
-                    cross_learning_data[dom_n].append(train_queues[cls][dom_n][i])
-                cross_learning_labels.append(cls)
-
-        cross_learning_data=[torch.stack(data) for data in cross_learning_data]
-        cross_learning_labels=torch.tensor(cross_learning_labels).to("cuda")
-        if (self.countersave<6 and self.saveSamples):
-            for dom_n in range(ndomains):
-                batch_images = make_grid(cross_learning_data[dom_n], nrow=queue_sz, normalize=True)
-                save_image(batch_images, "./domainbed/image_outputs/batch_im_"+str(self.countersave)+"_"+str(dom_n)+".png",normalize=False)
-            self.countersave+=1
-        pred=self.predictTrain(cross_learning_data)
-        loss = F.cross_entropy(pred, cross_learning_labels)
-
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-
-        return {'loss': loss.item()}
-    def predict(self, x):
-        return self.network([x]*self.num_domains)
-    def predictTrain(self, x):
-        return self.network(x)
 
 
 def load_model(fname):
@@ -638,3 +544,27 @@ def similarityCE(pred,predTarget):
             n_loss_terms += 1
     total_loss /= n_loss_terms 
     return total_loss
+
+def UpdateClsTrainQueues(minibatches):
+    train_queues=queue_var.train_queues
+    nclass=len(train_queues)
+    ndomains=len(train_queues[0])
+    for id_c in range(nclass): # loop over classes
+        for id_d in range(ndomains): # loop over domains
+            mb_ids=(minibatches[id_d][1] == id_c).nonzero(as_tuple=True)[0]
+            # indices of those egs from domain id_d, whose class label is id_c
+            label_tensor=minibatches[id_d][1][mb_ids] # labels
+            if mb_ids.size(0)==0:
+                #print('class has no element')
+                continue
+            data_tensor=minibatches[id_d][0][mb_ids] # data
+            data_tensor = data_tensor.detach()
+            
+            # update queue for this class and this domain
+            current_queue = train_queues[id_c][id_d]
+            current_queue = torch.cat((current_queue, data_tensor), 0)
+            current_queue = current_queue[-queue_sz:] # keep only the last queue_sz entries
+            train_queues[id_c][id_d] = current_queue
+            # all_labels+=label_tensor
+    queue_var.train_queues=train_queues
+    return train_queues
