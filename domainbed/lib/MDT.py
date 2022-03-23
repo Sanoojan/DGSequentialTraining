@@ -230,8 +230,8 @@ class Block(nn.Module):
         return x
 
 
-class MCVisionTransformer(nn.Module):
-    """ MultiClass Embedding Vision Transformer
+class MDVisionTransformer(nn.Module):
+    """ Vision Transformer
 
     A PyTorch impl of : `An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale`
         - https://arxiv.org/abs/2010.11929
@@ -243,7 +243,7 @@ class MCVisionTransformer(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=True, representation_size=None, distilled=False,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0., embed_layer=PatchEmbed, norm_layer=None,
-                 act_layer=None, weight_init='',num_cls_emb=3):
+                 act_layer=None, weight_init='',num_dist_token=3):
         """
         Args:
             img_size (int, tuple): input image size
@@ -263,12 +263,11 @@ class MCVisionTransformer(nn.Module):
             embed_layer (nn.Module): patch embedding layer
             norm_layer: (nn.Module): normalization layer
             weight_init: (str): weight init scheme
-            num_cls_emb: (int): Number of cls tokens
         """
         super().__init__()
         self.num_classes = num_classes
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
-        self.num_tokens = (1+num_cls_emb) if distilled else num_cls_emb
+        self.num_tokens = (1+num_dist_token) if distilled else 1
         norm_layer = norm_layer or partial(nn.LayerNorm, eps=1e-6)
         act_layer = act_layer or nn.GELU
 
@@ -276,9 +275,9 @@ class MCVisionTransformer(nn.Module):
             img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
         num_patches = self.patch_embed.num_patches
 
-        self.num_cls_emb=num_cls_emb
-        self.cls_tokens = nn.Parameter(torch.zeros(1, num_cls_emb, embed_dim)) 
-        self.dist_token = nn.Parameter(torch.zeros(1, 1, embed_dim)) if distilled else None
+        self.num_dist_token=num_dist_token
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        self.dist_tokens = nn.Parameter(torch.zeros(1, num_dist_token, embed_dim)) if distilled else None
         self.pos_embed_M = nn.Parameter(torch.zeros(1, num_patches + self.num_tokens, embed_dim))
         self.pos_drop = nn.Dropout(p=drop_rate)
 
@@ -312,13 +311,13 @@ class MCVisionTransformer(nn.Module):
         assert mode in ('jax', 'jax_nlhb', 'nlhb', '')
         head_bias = -math.log(self.num_classes) if 'nlhb' in mode else 0.
         trunc_normal_(self.pos_embed_M, std=.02)
-        if self.dist_token is not None:
-            trunc_normal_(self.dist_token, std=.02)
+        if self.dist_tokens is not None:
+            trunc_normal_(self.dist_tokens, std=.02)
         if mode.startswith('jax'):
             # leave cls token as zeros to match jax impl
             named_apply(partial(_init_vit_weights, head_bias=head_bias, jax_impl=True), self)
         else:
-            trunc_normal_(self.cls_tokens, std=.02) 
+            trunc_normal_(self.cls_token, std=.02)
             self.apply(_init_vit_weights)
 
     def _init_weights(self, m):
@@ -331,10 +330,10 @@ class MCVisionTransformer(nn.Module):
 
     @torch.jit.ignore
     def no_weight_decay(self):
-        return {'pos_embed', 'cls_tokens', 'dist_token'}
+        return {'pos_embed', 'cls_token', 'dist_token'}
 
     def get_classifier(self):
-        if self.dist_token is None:
+        if self.dist_tokens is None:
             return self.head
         else:
             return self.head, self.head_dist
@@ -347,18 +346,18 @@ class MCVisionTransformer(nn.Module):
 
     def forward_features(self, x):
         x = self.patch_embed(x)
-        cls_tokens = self.cls_tokens.expand(x.shape[0], -1, -1) # stole cls_tokens impl from Phil Wang, thanks
-        if self.dist_token is None:
-            x = torch.cat((cls_tokens, x), dim=1)
+        cls_token = self.cls_token.expand(x.shape[0], -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+        if self.dist_tokens is None:
+            x = torch.cat((cls_token, x), dim=1)
         else:
-            x = torch.cat((cls_tokens, self.dist_token.expand(x.shape[0], -1, -1), x), dim=1)
+            x = torch.cat((cls_token, x,self.dist_tokens.expand(x.shape[0], -1, -1)), dim=1)
         x = self.pos_drop(x + self.pos_embed_M)
         x = self.blocks(x)
         x = self.norm(x)
-        if self.dist_token is None:
-            return self.pre_logits(x[:, 0:self.num_cls_emb]) 
+        if self.dist_tokens is None:
+            return self.pre_logits(x[:, 0])
         else:
-            return self.pre_logits(x[:, 0:self.num_cls_emb]) , x[:, self.num_cls_emb]
+            return x[:, 0], x[:, -self.num_dist_token:]
 
     def forward(self, x):
         x = self.forward_features(x)
@@ -368,7 +367,7 @@ class MCVisionTransformer(nn.Module):
                 # during inference, return the average of both classifier predictions
                 return x, x_dist
             else:
-                return (x + x_dist) / 2
+                return x  # Care this #inference
         else:
             x = self.head(x)
         return x
@@ -410,7 +409,7 @@ def _init_vit_weights(module: nn.Module, name: str = '', head_bias: float = 0., 
 
 
 @torch.no_grad()
-def _load_weights(model: MCVisionTransformer, checkpoint_path: str, prefix: str = ''):
+def _load_weights(model: MDVisionTransformer, checkpoint_path: str, prefix: str = ''):
     """ Load weights from .npz checkpoints for official Google Brain Flax implementation
     """
     import numpy as np
@@ -457,12 +456,12 @@ def _load_weights(model: MCVisionTransformer, checkpoint_path: str, prefix: str 
             model.patch_embed.proj.weight.shape[1], _n2p(w[f'{prefix}embedding/kernel']))
     model.patch_embed.proj.weight.copy_(embed_conv_w)
     model.patch_embed.proj.bias.copy_(_n2p(w[f'{prefix}embedding/bias']))
-    model.cls_tokens.copy_(_n2p(w[f'{prefix}cls'], t=False))
+    model.cls_token.copy_(_n2p(w[f'{prefix}cls'], t=False))
     pos_embed_w = _n2p(w[f'{prefix}Transformer/posembed_input/pos_embedding'], t=False)
-    if pos_embed_w.shape != model.pos_embed.shape:
+    if pos_embed_w.shape != model.pos_embed_M.shape:
         pos_embed_w = resize_pos_embed(  # resize pos embedding when different size from pretrained weights
-            pos_embed_w, model.pos_embed, getattr(model, 'num_tokens', 1), model.patch_embed.grid_size)
-    model.pos_embed.copy_(pos_embed_w)
+            pos_embed_w, model.pos_embed_M, getattr(model, 'num_tokens', 1), model.patch_embed.grid_size)
+    model.pos_embed_M.copy_(pos_embed_w)
     model.norm.weight.copy_(_n2p(w[f'{prefix}Transformer/encoder_norm/scale']))
     model.norm.bias.copy_(_n2p(w[f'{prefix}Transformer/encoder_norm/bias']))
     if isinstance(model.head, nn.Linear) and model.head.bias.shape[0] == w[f'{prefix}head/bias'].shape[-1]:
@@ -522,10 +521,10 @@ def checkpoint_filter_fn(state_dict, model):
             # For old models that I trained prior to conv based patchification
             O, I, H, W = model.patch_embed.proj.weight.shape
             v = v.reshape(O, -1, H, W)
-        elif k == 'pos_embed' and v.shape != model.pos_embed.shape:
+        elif k == 'pos_embed' and v.shape != model.pos_embed_M.shape:
             # To resize pos embedding when using model at different size from pretrained weights
             v = resize_pos_embed(
-                v, model.pos_embed, getattr(model, 'num_tokens', 1), model.patch_embed.grid_size)
+                v, model.pos_embed_M, getattr(model, 'num_tokens', 1), model.patch_embed.grid_size)
         out_dict[k] = v
     return out_dict
 
@@ -546,7 +545,7 @@ def _create_vision_transformer(variant, pretrained=False, default_cfg=None, **kw
         repr_size = None
 
     model = build_model_with_cfg(
-        MCVisionTransformer, variant, pretrained,
+        MDVisionTransformer, variant, pretrained,
         default_cfg=default_cfg,
         representation_size=repr_size,
         pretrained_filter_fn=checkpoint_filter_fn,
@@ -555,45 +554,6 @@ def _create_vision_transformer(variant, pretrained=False, default_cfg=None, **kw
     return model
 
 
-
-@register_model
-def deit_tiny_patch16_224(pretrained=False, **kwargs):
-    """ DeiT-tiny model @ 224x224 from paper (https://arxiv.org/abs/2012.12877).
-    ImageNet-1k weights from https://github.com/facebookresearch/deit.
-    """
-    model_kwargs = dict(patch_size=16, embed_dim=192, depth=12, num_heads=3, **kwargs)
-    model = _create_vision_transformer('deit_tiny_patch16_224', pretrained=pretrained, **model_kwargs)
-    return model
-
-
-@register_model
-def deit_small_patch16_224(pretrained=False, **kwargs):
-    """ DeiT-small model @ 224x224 from paper (https://arxiv.org/abs/2012.12877).
-    ImageNet-1k weights from https://github.com/facebookresearch/deit.
-    """
-    model_kwargs = dict(patch_size=16, embed_dim=384, depth=12, num_heads=6, **kwargs)
-    model = _create_vision_transformer('deit_small_patch16_224', pretrained=pretrained, **model_kwargs)
-    return model
-
-
-@register_model
-def deit_base_patch16_224(pretrained=False, **kwargs):
-    """ DeiT base model @ 224x224 from paper (https://arxiv.org/abs/2012.12877).
-    ImageNet-1k weights from https://github.com/facebookresearch/deit.
-    """
-    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, **kwargs)
-    model = _create_vision_transformer('deit_base_patch16_224', pretrained=pretrained, **model_kwargs)
-    return model
-
-
-@register_model
-def deit_base_patch16_384(pretrained=False, **kwargs):
-    """ DeiT base model @ 384x384 from paper (https://arxiv.org/abs/2012.12877).
-    ImageNet-1k weights from https://github.com/facebookresearch/deit.
-    """
-    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, **kwargs)
-    model = _create_vision_transformer('deit_base_patch16_384', pretrained=pretrained, **model_kwargs)
-    return model
 
 
 @register_model
