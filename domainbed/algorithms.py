@@ -122,10 +122,12 @@ class MultiDomainDistillation(Algorithm):
                                   hparams)
        
         self.num_domains=num_domains
-        load_model_path='domainbed/pretrained/single_train_models/DeitSmall/820147d8f3bc2473e6b839f2e4fb0f2e/best_val_model_valdom_2_0.9940.pkl' #should not be the test model
-        deit_trained_dgbed=load_model(load_model_path)
+        # load_model_path='domainbed/pretrained/single_train_models/DeitSmall/820147d8f3bc2473e6b839f2e4fb0f2e/best_val_model_valdom_2_0.9940.pkl' #should not be the test model
+        # deit_trained_dgbed=load_model(load_model_path)
+        network_deit=deit_small_patch16_224(pretrained=True) 
+        network_deit.head = nn.Linear(384, num_classes)
         self.network=MCVisionTransformer(img_size=224,num_classes=num_classes, distilled=False,patch_size=16, embed_dim=384, depth=12, num_heads=6,num_cls_emb=num_domains)
-        self.network.load_state_dict(deit_trained_dgbed.network.state_dict(),strict=False) 
+        self.network.load_state_dict(network_deit.state_dict(),strict=False) 
         printNetworkParams(self.network)
         self.optimizer = torch.optim.Adam(
             self.network.parameters(),
@@ -148,8 +150,10 @@ class MultiDomainDistillation(Algorithm):
         all_x = torch.cat([x for x,y in minibatches])
         all_y = torch.cat([y for x,y in minibatches])
         loss=0
-        predictions=torch.chunk(self.predictTrain(all_x),self.num_domains,dim=0)
+        predictions=self.predictTrain(all_x)
+        loss+= F.cross_entropy(torch.mean(predictions,dim=1), all_y)
 
+        predictions=torch.chunk(predictions,self.num_domains,dim=0)
         t = self.temp
         Wd=self.Wd
         for dom in range(self.num_domains):
@@ -421,8 +425,10 @@ class MultiDomainDistillation_Dtokens(Algorithm):
         self.num_domains=num_domains
         network_deit=deit_small_patch16_224(pretrained=True) 
         network_deit.head = nn.Linear(384, num_classes)
+        # network_deit.head_dist = nn.Linear(384, num_classes)  # reinitialize the last layer for distillation
     
-        self.network=MDVisionTransformer(img_size=224,num_classes=num_classes, distilled=True,patch_size=16, embed_dim=384, depth=12, num_heads=6,num_dist_token=num_domains)
+    
+        self.network=MDVisionTransformer(img_size=224,num_classes=num_classes, distilled=True,patch_size=16, embed_dim=384, depth=12, num_heads=6,num_dist_token=num_classes)
         self.network.load_state_dict(network_deit.state_dict(),strict=False) 
         printNetworkParams(self.network)
         self.optimizer = torch.optim.Adam(
@@ -446,19 +452,19 @@ class MultiDomainDistillation_Dtokens(Algorithm):
         all_x = torch.cat([x for x,y in minibatches])
         all_y = torch.cat([y for x,y in minibatches])
         loss=0
-        pred,pred_dist=self.predict(all_x)
+        pred,pred_dist=self.predictTrain(all_x)
         loss+= F.cross_entropy(pred,all_y)
         pred_dist=torch.chunk(pred_dist,self.num_domains,dim=0)
         t = self.temp
         Wd=self.Wd
-        # for dom in range(self.num_domains):
+        for dom in range(self.num_domains):
             
-        #     loss+= Wd* F.kl_div(
-        #         F.log_softmax(pred_dist[dom][:,dom] / t, dim=1),
-        #         F.log_softmax(self.predictTeacher(self.Teachnetwork[dom],minibatches[dom][0]) / t, dim=1),
-        #         reduction='sum',
-        #         log_target=True
-        #     ) * (t * t) / pred_dist[dom][:,dom].numel()
+            loss+= Wd* F.kl_div(
+                F.log_softmax(pred_dist[dom][:,dom] / t, dim=1),
+                F.log_softmax(self.predictTeacher(self.Teachnetwork[dom],minibatches[dom][0]) / t, dim=1),
+                reduction='sum',
+                log_target=True
+            ) * (t * t) / pred_dist[dom][:,dom].numel()
     
 
         self.optimizer.zero_grad()
@@ -468,10 +474,14 @@ class MultiDomainDistillation_Dtokens(Algorithm):
         return {'loss': loss.item()}
 
        
-    def predict(self, x):
+    def predictTrain(self, x):
         return self.network(x)
     def predictTeacher(self,net, x):
         return net.predict(x)
+    def predict(self, x):
+        out,out_dist= self.network(x,return_dist_inf=True)
+        return out_dist[:,2]
+
 
 
 class DeitTiny(ERM):

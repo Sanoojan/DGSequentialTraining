@@ -9,12 +9,15 @@ import tqdm
 
 from domainbed.lib.query import Q
 
-def load_records(path):
+def load_records(path,test_post_results=False):
     records = []
     for i, subdir in tqdm.tqdm(list(enumerate(os.listdir(path))),
                                ncols=80,
                                leave=False):
-        results_path = os.path.join(path, subdir, "results.jsonl")
+        if (test_post_results):
+            results_path = os.path.join(path, subdir, "results_test.jsonl")
+        else:
+            results_path = os.path.join(path, subdir, "results.jsonl")
         try:
             with open(results_path, "r") as f:
                 for line in f:

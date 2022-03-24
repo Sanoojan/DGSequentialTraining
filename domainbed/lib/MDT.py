@@ -278,7 +278,9 @@ class MDVisionTransformer(nn.Module):
         self.num_dist_token=num_dist_token
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.dist_tokens = nn.Parameter(torch.zeros(1, num_dist_token, embed_dim)) if distilled else None
-        self.pos_embed_M = nn.Parameter(torch.zeros(1, num_patches + self.num_tokens, embed_dim))
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
+        self.pos_embed2=nn.Parameter(torch.zeros(1, num_dist_token, embed_dim))
+        
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
@@ -310,7 +312,8 @@ class MDVisionTransformer(nn.Module):
     def init_weights(self, mode=''):
         assert mode in ('jax', 'jax_nlhb', 'nlhb', '')
         head_bias = -math.log(self.num_classes) if 'nlhb' in mode else 0.
-        trunc_normal_(self.pos_embed_M, std=.02)
+        trunc_normal_(self.pos_embed, std=.02)
+        trunc_normal_(self.pos_embed2, std=.02)
         if self.dist_tokens is not None:
             trunc_normal_(self.dist_tokens, std=.02)
         if mode.startswith('jax'):
@@ -351,7 +354,7 @@ class MDVisionTransformer(nn.Module):
             x = torch.cat((cls_token, x), dim=1)
         else:
             x = torch.cat((cls_token, x,self.dist_tokens.expand(x.shape[0], -1, -1)), dim=1)
-        x = self.pos_drop(x + self.pos_embed_M)
+        x = self.pos_drop(x + torch.cat([self.pos_embed,self.pos_embed2],dim=1))
         x = self.blocks(x)
         x = self.norm(x)
         if self.dist_tokens is None:
@@ -359,11 +362,11 @@ class MDVisionTransformer(nn.Module):
         else:
             return x[:, 0], x[:, -self.num_dist_token:]
 
-    def forward(self, x):
+    def forward(self, x,return_dist_inf=False):
         x = self.forward_features(x)
         if self.head_dist is not None:
             x, x_dist = self.head(x[0]), self.head_dist(x[1])  # x must be a tuple
-            if self.training and not torch.jit.is_scripting():
+            if (self.training and not torch.jit.is_scripting()) or return_dist_inf:
                 # during inference, return the average of both classifier predictions
                 return x, x_dist
             else:
@@ -458,10 +461,10 @@ def _load_weights(model: MDVisionTransformer, checkpoint_path: str, prefix: str 
     model.patch_embed.proj.bias.copy_(_n2p(w[f'{prefix}embedding/bias']))
     model.cls_token.copy_(_n2p(w[f'{prefix}cls'], t=False))
     pos_embed_w = _n2p(w[f'{prefix}Transformer/posembed_input/pos_embedding'], t=False)
-    if pos_embed_w.shape != model.pos_embed_M.shape:
+    if pos_embed_w.shape != model.pos_embed.shape:
         pos_embed_w = resize_pos_embed(  # resize pos embedding when different size from pretrained weights
-            pos_embed_w, model.pos_embed_M, getattr(model, 'num_tokens', 1), model.patch_embed.grid_size)
-    model.pos_embed_M.copy_(pos_embed_w)
+            pos_embed_w, model.pos_embed, getattr(model, 'num_tokens', 1), model.patch_embed.grid_size)
+    model.pos_embed.copy_(pos_embed_w)
     model.norm.weight.copy_(_n2p(w[f'{prefix}Transformer/encoder_norm/scale']))
     model.norm.bias.copy_(_n2p(w[f'{prefix}Transformer/encoder_norm/bias']))
     if isinstance(model.head, nn.Linear) and model.head.bias.shape[0] == w[f'{prefix}head/bias'].shape[-1]:
@@ -521,10 +524,10 @@ def checkpoint_filter_fn(state_dict, model):
             # For old models that I trained prior to conv based patchification
             O, I, H, W = model.patch_embed.proj.weight.shape
             v = v.reshape(O, -1, H, W)
-        elif k == 'pos_embed' and v.shape != model.pos_embed_M.shape:
+        elif k == 'pos_embed' and v.shape != model.pos_embed.shape:
             # To resize pos embedding when using model at different size from pretrained weights
             v = resize_pos_embed(
-                v, model.pos_embed_M, getattr(model, 'num_tokens', 1), model.patch_embed.grid_size)
+                v, model.pos_embed, getattr(model, 'num_tokens', 1), model.patch_embed.grid_size)
         out_dict[k] = v
     return out_dict
 

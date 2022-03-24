@@ -61,14 +61,20 @@ if __name__ == "__main__":
     parser.add_argument('--holdout_fraction', type=float, default=0.2)
     parser.add_argument('--uda_holdout_fraction', type=float, default=0,
         help="For domain adaptation, % of test to use unlabeled for training.")
-    parser.add_argument('--pretrained', type=str, default="/home/computervision1/DG_new_idea_Sanoojan/domainbed/Our_Model_Complete/PACS/DeiT_Small_RB_Distill_loss0.1_BEST/train_output/model.pkl")
+    parser.add_argument('--pretrained', type=str, default=None)
     parser.add_argument('--algo_name', type=str, default=None)
     parser.add_argument('--confusion_matrix', type=bool, default=False)
     parser.add_argument('--test_robustness', type=bool, default=False)
+    parser.add_argument('--accuracy', type=bool, default=True)
+    
     args = parser.parse_args()
+    if(args.pretrained==None):
+        onlyfiles = [f for f in os.listdir(args.output_dir) if os.path.isfile(os.path.join(args.output_dir, f))]
+        for f in onlyfiles:
+            if "best_val_model" in f:
+                args.pretrained=os.path.join(args.output_dir, f)
+                break
 
-    # If we ever want to implement checkpointing, just persist these values
-    # every once in a while, and then load them from disk here.
     start_step = 0
     algorithm_dict = None
 
@@ -76,14 +82,6 @@ if __name__ == "__main__":
     sys.stdout = misc.Tee(os.path.join(args.output_dir, 'out.txt'))
     sys.stderr = misc.Tee(os.path.join(args.output_dir, 'err.txt'))
 
-    # print("Environment:")
-    # print("\tPython: {}".format(sys.version.split(" ")[0]))
-    # print("\tPyTorch: {}".format(torch.__version__))
-    # print("\tTorchvision: {}".format(torchvision.__version__))
-    # print("\tCUDA: {}".format(torch.version.cuda))
-    # print("\tCUDNN: {}".format(torch.backends.cudnn.version()))
-    # print("\tNumPy: {}".format(np.__version__))
-    # print("\tPIL: {}".format(PIL.__version__))
 
     print('Args:')
     for k, v in sorted(vars(args).items()):
@@ -201,8 +199,12 @@ if __name__ == "__main__":
         args.algorithm=type(algorithm).__name__
         args.algo_name=args.algorithm
     else:
-        algorithm = algorithm_class(dataset.input_shape, dataset.num_classes,
-            len(dataset) - len(args.test_envs), hparams)
+        fname=args.pretrained
+        algorithm =load_model(fname)
+        args.algorithm=type(algorithm).__name__
+        args.algo_name=args.algorithm
+        # algorithm = algorithm_class(dataset.input_shape, dataset.num_classes,
+        #     len(dataset) - len(args.test_envs), hparams)
         
 
     if algorithm_dict is not None:
@@ -250,45 +252,49 @@ if __name__ == "__main__":
     evals = zip(eval_loader_names, eval_loaders, eval_weights)
     algo_name=args.algo_name
     for name, loader, weights in evals:
-        if (int(name[3]) in args.test_envs and  "in" in name):
+        if(args.accuracy):
+            acc = misc.accuracy(algorithm, loader, weights, device)
+            # print(algo_name,":",name,":",acc)
+            results[name+'_acc'] = acc
+        elif (int(name[3]) in args.test_envs and  "in" in name):
             print("name",name)
             env_name=name[:4]
+
             if(args.confusion_matrix):
                 conf=misc.confusionMatrix(algorithm, loader, weights, device,args.output_dir,env_name,algo_name)
             elif(args.test_robustness):
                 acc=misc.accuracy(algorithm, loader, weights, device,addnoise=True)
-                print(algo_name,":",env_name[3],":",acc)
+                print(algo_name,"_with_noise:",env_name[3],":",acc)
             else:
                 block_acc=misc.plot_block_accuracy2(algorithm, loader, weights, device,args.output_dir,env_name,algo_name)
             
             
-            # results_keys = sorted(results.keys())
-            # if results_keys != last_results_keys:
-            #     misc.print_row(results_keys, colwidth=12)
-            #     last_results_keys = results_keys
-            # misc.print_row([results[key] for key in results_keys],
-            #     colwidth=12)
+    results_keys = sorted(results.keys())
+    if results_keys != last_results_keys:
+        misc.print_row(results_keys, colwidth=12)
+        last_results_keys = results_keys
+    misc.print_row([results[key] for key in results_keys],
+        colwidth=12)
 
-            # results.update({
-            #     'hparams': hparams,
-            #     'args': vars(args)
-            # })
+    results.update({
+        'hparams': hparams,
+        'args': vars(args)
+    })
+    
+    epochs_path = os.path.join(args.output_dir, 'results_test.jsonl')
+    if os.path.exists(epochs_path):
+        os.remove(epochs_path)
+    with open(epochs_path, 'a') as f:
+        f.write(json.dumps(results, sort_keys=True) + "\n")
 
-            # epochs_path = os.path.join(args.output_dir, 'results.jsonl')
-            # with open(epochs_path, 'a') as f:
-            #     f.write(json.dumps(results, sort_keys=True) + "\n")
+    algorithm_dict = algorithm.state_dict()
 
-            # algorithm_dict = algorithm.state_dict()
-            # start_step = step + 1
-            # checkpoint_vals = collections.defaultdict(lambda: [])
+    checkpoint_vals = collections.defaultdict(lambda: [])
 
-            # if args.save_model_every_checkpoint:
-            #     save_checkpoint(f'model_step{step}.pkl')
+      
 
-    # save_checkpoint('model.pkl')
-
-    # with open(os.path.join(args.output_dir, 'done'), 'w') as f:
-    #     f.write('done')
+    with open(os.path.join(args.output_dir, 'done'), 'w') as f:
+        f.write('done')
 
 
 

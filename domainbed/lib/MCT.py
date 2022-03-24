@@ -268,7 +268,7 @@ class MCVisionTransformer(nn.Module):
         super().__init__()
         self.num_classes = num_classes
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
-        self.num_tokens = (1+num_cls_emb) if distilled else num_cls_emb
+        self.num_tokens = 2 if distilled else 1
         norm_layer = norm_layer or partial(nn.LayerNorm, eps=1e-6)
         act_layer = act_layer or nn.GELU
 
@@ -277,9 +277,11 @@ class MCVisionTransformer(nn.Module):
         num_patches = self.patch_embed.num_patches
 
         self.num_cls_emb=num_cls_emb
-        self.cls_tokens = nn.Parameter(torch.zeros(1, num_cls_emb, embed_dim)) 
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim)) 
+        self.cls_token2=nn.Parameter(torch.zeros(1, num_cls_emb-1, embed_dim)) 
         self.dist_token = nn.Parameter(torch.zeros(1, 1, embed_dim)) if distilled else None
-        self.pos_embed_M = nn.Parameter(torch.zeros(1, num_patches + self.num_tokens, embed_dim))
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + self.num_tokens, embed_dim))
+        self.pos_embed2=nn.Parameter(torch.zeros(1,num_cls_emb-1, embed_dim))
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
@@ -311,14 +313,16 @@ class MCVisionTransformer(nn.Module):
     def init_weights(self, mode=''):
         assert mode in ('jax', 'jax_nlhb', 'nlhb', '')
         head_bias = -math.log(self.num_classes) if 'nlhb' in mode else 0.
-        trunc_normal_(self.pos_embed_M, std=.02)
+        trunc_normal_(self.pos_embed, std=.02)
+        trunc_normal_(self.pos_embed2, std=.02)
         if self.dist_token is not None:
             trunc_normal_(self.dist_token, std=.02)
         if mode.startswith('jax'):
             # leave cls token as zeros to match jax impl
             named_apply(partial(_init_vit_weights, head_bias=head_bias, jax_impl=True), self)
         else:
-            trunc_normal_(self.cls_tokens, std=.02) 
+            trunc_normal_(self.cls_token, std=.02) 
+            trunc_normal_(self.cls_token2, std=.02) 
             self.apply(_init_vit_weights)
 
     def _init_weights(self, m):
@@ -347,18 +351,19 @@ class MCVisionTransformer(nn.Module):
 
     def forward_features(self, x):
         x = self.patch_embed(x)
-        cls_tokens = self.cls_tokens.expand(x.shape[0], -1, -1) # stole cls_tokens impl from Phil Wang, thanks
+        cls_token = self.cls_token.expand(x.shape[0], -1, -1) # stole cls_tokens impl from Phil Wang, thanks
+        cls_token2 = self.cls_token2.expand(x.shape[0], -1, -1)
         if self.dist_token is None:
-            x = torch.cat((cls_tokens, x), dim=1)
+            x = torch.cat((cls_token, x,cls_token2), dim=1)
         else:
-            x = torch.cat((cls_tokens, self.dist_token.expand(x.shape[0], -1, -1), x), dim=1)
-        x = self.pos_drop(x + self.pos_embed_M)
+            x = torch.cat((cls_token, self.dist_token.expand(x.shape[0], -1, -1), x,cls_token2), dim=1)
+        x = self.pos_drop(x +torch.cat([self.pos_embed,self.pos_embed2],dim=1))
         x = self.blocks(x)
         x = self.norm(x)
         if self.dist_token is None:
-            return self.pre_logits(x[:, 0:self.num_cls_emb]) 
+            return self.pre_logits(torch.stack([x[:, 0],x[:,-2],x[:,-1]],dim=1)) 
         else:
-            return self.pre_logits(x[:, 0:self.num_cls_emb]) , x[:, self.num_cls_emb]
+            return torch.stack([x[:, 0],x[:,-2],x[:,-1]],dim=1), x[:, 1]
 
     def forward(self, x):
         x = self.forward_features(x)
