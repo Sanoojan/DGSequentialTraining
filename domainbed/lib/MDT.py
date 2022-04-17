@@ -1,3 +1,4 @@
+
 """ Vision Transformer (ViT) in PyTorch
 
 A PyTorch implement of Vision Transformers as described in:
@@ -27,6 +28,8 @@ import logging
 from functools import partial
 from collections import OrderedDict
 from copy import deepcopy
+
+import itertools
 
 import torch
 import torch.nn as nn
@@ -185,7 +188,7 @@ default_cfgs = {
 
 
 class Attention(nn.Module):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0.):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0.,attn_sep_mask=False,mask_clsT_distT=True,mask_dist_other_patches=False,num_tokens_at_end=3,total_tokens=4):
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
@@ -195,6 +198,12 @@ class Attention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
+        self.attn_sep_mask=attn_sep_mask
+        self.num_tokens_at_end=num_tokens_at_end
+        self.total_tokens=total_tokens
+        self.mask_dist_other_patches=mask_dist_other_patches
+        self.mask_clsT_distT=mask_clsT_distT
+        
 
     def forward(self, x):
         B, N, C = x.shape
@@ -202,9 +211,21 @@ class Attention(nn.Module):
         q, k, v = qkv.unbind(0)   # make torchscript happy (cannot use tensor as tuple)
 
         attn = (q @ k.transpose(-2, -1)) * self.scale
+        if(self.attn_sep_mask):
+            start_mask=0 if self.mask_clsT_distT else 1
+            list_ind=list(range(start_mask,self.total_tokens-self.num_tokens_at_end))+list(range(N-self.num_tokens_at_end,N))
+            permutations=itertools.permutations(list_ind, 2)
+            # mask to avoid attention between token
+            for p in permutations:
+                attn[:,:,p[0],p[1]]-=float('inf')
+            
+            if(self.mask_dist_other_patches and self.training and not torch.jit.is_scripting()):
+                for b in range(self.num_tokens_at_end):
+                    attn[int((B/3)*b):int((B/3)*(b+1)),:,self.total_tokens-self.num_tokens_at_end:N-self.num_tokens_at_end,N-self.num_tokens_at_end+b]-=float('inf') # assumed all distT at end
+                    attn[int((B/3)*b):int((B/3)*(b+1)),:,N-self.num_tokens_at_end+b,self.total_tokens-self.num_tokens_at_end:N-self.num_tokens_at_end]-=float('inf')
+
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
-
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
@@ -214,10 +235,10 @@ class Attention(nn.Module):
 class Block(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0.,
-                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm,attn_sep_mask=False,mask_clsT_distT=True,mask_dist_other_patches=False,num_tokens_at_end=3,total_tokens=4):
         super().__init__()
         self.norm1 = norm_layer(dim)
-        self.attn = Attention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop)
+        self.attn = Attention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop,attn_sep_mask=attn_sep_mask,mask_clsT_distT=mask_clsT_distT,mask_dist_other_patches=mask_dist_other_patches,num_tokens_at_end=num_tokens_at_end,total_tokens=total_tokens)
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
@@ -243,7 +264,7 @@ class MDVisionTransformer(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=True, representation_size=None, distilled=False,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0., embed_layer=PatchEmbed, norm_layer=None,
-                 act_layer=None, weight_init='',num_dist_token=3):
+                 act_layer=None, weight_init='',num_dist_token=3,attn_sep_mask=False,mask_clsT_distT=True,mask_dist_other_patches=False):
         """
         Args:
             img_size (int, tuple): input image size
@@ -287,7 +308,7 @@ class MDVisionTransformer(nn.Module):
         self.blocks = nn.Sequential(*[
             Block(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, drop=drop_rate,
-                attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, act_layer=act_layer)
+                attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, act_layer=act_layer,attn_sep_mask=attn_sep_mask,mask_clsT_distT=mask_clsT_distT,mask_dist_other_patches=mask_dist_other_patches,num_tokens_at_end=num_dist_token,total_tokens=self.num_tokens)
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
 
@@ -303,9 +324,9 @@ class MDVisionTransformer(nn.Module):
 
         # Classifier head(s)
         self.head = nn.Linear(self.num_features, num_classes) if num_classes > 0 else nn.Identity()
-        self.head_dist = None
+        self.head_dists = None
         if distilled:
-            self.head_dist = nn.Linear(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity()
+            self.head_dists =nn.ModuleList([nn.Linear(self.embed_dim, self.num_classes).to("cuda") if num_classes > 0 else nn.Identity() for _ in range(num_dist_token)]) 
 
         self.init_weights(weight_init)
 
@@ -339,13 +360,13 @@ class MDVisionTransformer(nn.Module):
         if self.dist_tokens is None:
             return self.head
         else:
-            return self.head, self.head_dist
+            return self.head, self.head_dists
 
     def reset_classifier(self, num_classes, global_pool=''):
         self.num_classes = num_classes
         self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
         if self.num_tokens == 2:
-            self.head_dist = nn.Linear(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity()
+            [nn.Linear(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity() for _ in range(self.num_dist_token)]
 
     def forward_features(self, x):
         x = self.patch_embed(x)
@@ -364,8 +385,8 @@ class MDVisionTransformer(nn.Module):
 
     def forward(self, x,return_dist_inf=False):
         x = self.forward_features(x)
-        if self.head_dist is not None:
-            x, x_dist = self.head(x[0]), self.head_dist(x[1])  # x must be a tuple
+        if self.head_dists is not None:
+            x, x_dist = self.head(x[0]), torch.stack([self.head_dists[i](x[1][:,i]) for i in range(self.num_dist_token)],dim=1)  # x must be a tuple
             if (self.training and not torch.jit.is_scripting()) or return_dist_inf:
                 # during inference, return the average of both classifier predictions
                 return x, x_dist
@@ -579,4 +600,3 @@ def deit_small_distilled_patch16_224(pretrained=False, **kwargs):
     model = _create_vision_transformer(
         'deit_small_distilled_patch16_224', pretrained=pretrained,  distilled=True, **model_kwargs)
     return model
-

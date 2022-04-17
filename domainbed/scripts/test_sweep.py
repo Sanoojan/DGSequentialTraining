@@ -207,7 +207,7 @@ if __name__ == "__main__":
         print(f'About to Test {len(to_launch)} jobs.')
         if not args.skip_confirmation:
             ask_for_confirmation()
-        launcher_fn = command_launchers.REGISTRY["gpu_2"]
+        launcher_fn = command_launchers.REGISTRY["multi_gpu_0_1"]
         Job.launch(to_launch, launcher_fn)
 
       
