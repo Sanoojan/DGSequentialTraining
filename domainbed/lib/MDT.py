@@ -221,8 +221,11 @@ class Attention(nn.Module):
             
             if(self.mask_dist_other_patches and self.training and not torch.jit.is_scripting()):
                 for b in range(self.num_tokens_at_end):
-                    attn[int((B/3)*b):int((B/3)*(b+1)),:,self.total_tokens-self.num_tokens_at_end:N-self.num_tokens_at_end,N-self.num_tokens_at_end+b]-=float('inf') # assumed all distT at end
-                    attn[int((B/3)*b):int((B/3)*(b+1)),:,N-self.num_tokens_at_end+b,self.total_tokens-self.num_tokens_at_end:N-self.num_tokens_at_end]-=float('inf')
+                    for b_mask in range(self.num_tokens_at_end):
+                        if(b_mask==b):
+                            continue
+                        attn[int((B/3)*b):int((B/3)*(b+1)),:,self.total_tokens-self.num_tokens_at_end:N-self.num_tokens_at_end,N-self.num_tokens_at_end+b_mask]-=float('inf') # assumed all distT at end
+                        attn[int((B/3)*b):int((B/3)*(b+1)),:,N-self.num_tokens_at_end+b_mask,self.total_tokens-self.num_tokens_at_end:N-self.num_tokens_at_end]-=float('inf')
 
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)

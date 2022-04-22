@@ -454,7 +454,7 @@ class Deit_dist(Algorithm):
         return net.predict(x)
     def predict(self, x):
         out,out_dist= self.network(x,return_dist_inf=True)
-        return (out+out_dist[:,0])/2
+        return out
         m=nn.Softmax(dim=1)
         weighted_out=-torch.sum(torch.nn.functional.log_softmax(out,dim=1)*m(out),dim=1).view(-1,1).expand(-1,out.shape[1])*out
         for i in range(out_dist.shape[1]):
@@ -481,9 +481,12 @@ class MultiDomainDistillation_Dtokens(Algorithm):
         network_deit.head = nn.Linear(384, num_classes)
         # network_deit.head_dist = nn.Linear(384, num_classes)  # reinitialize the last layer for distillation
         attn_sep_mask=self.hparams["attn_sep_mask"]
-      
+        mask_clsT_distT=self.hparams["mask_clsT_distT"]
+        mask_dist_other_patches=self.hparams["mask_dist_other_patches"]
+        # mask_clsT_distT=True
+        # mask_dist_other_patches=False
     
-        self.network=MDVisionTransformer(img_size=224,num_classes=num_classes, distilled=True,patch_size=16, embed_dim=384, depth=12, num_heads=6,num_dist_token=num_domains,attn_sep_mask=attn_sep_mask)
+        self.network=MDVisionTransformer(img_size=224,num_classes=num_classes, distilled=True,patch_size=16, embed_dim=384, depth=12, num_heads=6,num_dist_token=num_domains,attn_sep_mask=attn_sep_mask,mask_clsT_distT=mask_clsT_distT,mask_dist_other_patches=mask_dist_other_patches)
         self.network.load_state_dict(network_deit.state_dict(),strict=False) 
         printNetworkParams(self.network)
         self.optimizer = torch.optim.Adam(
@@ -535,7 +538,7 @@ class MultiDomainDistillation_Dtokens(Algorithm):
         return net.predict(x)
     def predict(self, x):
         out,out_dist= self.network(x,return_dist_inf=True)
-        return out_dist[:,0]
+        return out
         m=nn.Softmax(dim=1)
         weighted_out=-torch.sum(torch.nn.functional.log_softmax(out,dim=1)*m(out),dim=1).view(-1,1).expand(-1,out.shape[1])*out
         for i in range(out_dist.shape[1]):
@@ -617,7 +620,7 @@ class MultiDomainDistillation_Dtokens_patchmask(Algorithm):
         return net.predict(x)
     def predict(self, x):
         out,out_dist= self.network(x,return_dist_inf=True)
-        return out
+        return out_dist[:,1]
         m=nn.Softmax(dim=1)
         weighted_out=-torch.sum(torch.nn.functional.log_softmax(out,dim=1)*m(out),dim=1).view(-1,1).expand(-1,out.shape[1])*out
         for i in range(out_dist.shape[1]):
@@ -644,11 +647,10 @@ class MultiDomainDistillation_Dtokens_CE(Algorithm):
         network_deit.head = nn.Linear(384, num_classes)
         network_deit.head_dist = nn.Linear(384, num_classes)  # reinitialize the last layer for distillation
         attn_sep_mask=self.hparams["attn_sep_mask"]
-
-        if(attn_sep_mask==True):
-            print("Attention between tokens restricted")
+        mask_clsT_distT=self.hparams["mask_clsT_distT"]
+        mask_dist_other_patches=self.hparams["mask_dist_other_patches"]
     
-        self.network=MDVisionTransformer(img_size=224,num_classes=num_classes, distilled=True,patch_size=16, embed_dim=384, depth=12, num_heads=6,num_dist_token=num_domains,attn_sep_mask=attn_sep_mask)
+        self.network=MDVisionTransformer(img_size=224,num_classes=num_classes, distilled=True,patch_size=16, embed_dim=384, depth=12, num_heads=6,num_dist_token=num_domains,attn_sep_mask=attn_sep_mask,mask_clsT_distT=mask_clsT_distT,mask_dist_other_patches=mask_dist_other_patches)
         self.network.load_state_dict(network_deit.state_dict(),strict=False) 
         printNetworkParams(self.network)
         self.optimizer = torch.optim.Adam(
@@ -673,7 +675,7 @@ class MultiDomainDistillation_Dtokens_CE(Algorithm):
         all_y = torch.cat([y for x,y in minibatches])
         loss=0
         pred,pred_dist=self.predictTrain(all_x)
-        loss+= F.cross_entropy(pred,all_y)
+        # loss+= F.cross_entropy(pred,all_y)
         pred_dist=torch.chunk(pred_dist,self.num_domains,dim=0)
         t = self.temp
         Wd=self.Wd
@@ -694,6 +696,7 @@ class MultiDomainDistillation_Dtokens_CE(Algorithm):
         return net.predict(x)
     def predict(self, x):
         out,out_dist= self.network(x,return_dist_inf=True)
+        return torch.sum(out_dist,dim=1)
         m=nn.Softmax(dim=1)
         weighted_out=m(out)
         for i in range(out_dist.shape[1]):

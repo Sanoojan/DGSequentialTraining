@@ -42,7 +42,6 @@ def _hparams(algorithm, dataset, random_seed):
     if algorithm in ['MultiDomainDistillation','DeitSmall_StrongTeachers','DeitSmall_StrongTeachers_nodist','MultiDomainDistillation_Dtokens','MultiDomainDistillation_Dtokens_wtClsDist','MultiDomainDistillation_Dtokens_CE','Deit_dist','MultiDomainDistillation_Dtokens_patchmask']:
         _hparam('temp', 3.0, lambda r: r.uniform(1.0, 7.0))
         _hparam('Wd', 1.0, lambda r: r.choice([0., 0.1, 0.05, 0.8,2.0]))
-        #for multi dist token algos
         _hparam('attn_sep_mask', False, lambda r: False)
         _hparam('mask_dist_other_patches', False, lambda r: False)
         _hparam('mask_clsT_distT', True, lambda r: True) # works only if attn_sep_mask

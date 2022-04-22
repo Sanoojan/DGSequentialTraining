@@ -4,13 +4,14 @@ for command in delete_incomplete launch
 do
     python -m domainbed.scripts.sweep $command\
         --data_dir=/share/data/drive_2/DG/data \
-        --output_dir=./domainbed/outputs/PACS/MultiDomainDistillation/cls_token_averagedCE\
+        --output_dir=./domainbed/outputs/MDT/seperateCE_allmask \
         --command_launcher multi_gpu_0_1\
-        --algorithms MultiDomainDistillation \
+        --algorithms MultiDomainDistillation_Dtokens_CE \
         --single_test_envs \
         --datasets PACS \
         --n_hparams 1  \
         --n_trials 3 \
-        --hparams """{\"batch_size\":32}"""
+        --skip_confirmation \
+        --hparams """{\"batch_size\":32,\"attn_sep_mask\":1,\"mask_clsT_distT\":1,\"mask_dist_other_patches\":1}""" 
 done
 
