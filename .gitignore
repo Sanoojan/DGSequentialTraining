@@ -25,3 +25,5 @@ domainbed/pretrained/
 
 
 Sweep_PACS.sh
+data_small/
+img_outs/

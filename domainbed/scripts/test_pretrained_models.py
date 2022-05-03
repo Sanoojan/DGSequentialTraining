@@ -79,7 +79,7 @@ if __name__ == "__main__":
     algorithm_dict = None
 
     os.makedirs(args.output_dir, exist_ok=True)
-    sys.stdout = misc.Tee(os.path.join(args.output_dir, 'out.txt'))
+    sys.stdout = misc.Tee(os.path.join(args.output_dir, 'out1.txt'))
     sys.stderr = misc.Tee(os.path.join(args.output_dir, 'err.txt'))
 
 

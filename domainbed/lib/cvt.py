@@ -673,7 +673,7 @@ def small_cvt(pretrained=False, index=0, **kwargs):
     )
     model.default_cfg = _cfg()
     if pretrained:
-        model.load_state_dict(torch.load("/home/computervision1/Sanoojan/DomainBedS/domainbed/pretrained/cvt/CvT-21-224x224-IN-1k.pth", map_location="cpu"), strict=False)
+        model.load_state_dict(torch.load("domainbed/pretrained/cvt/CvT-21-224x224-IN-1k.pth", map_location="cpu"), strict=False)
     return model
 
 
@@ -713,7 +713,7 @@ def tiny_cvt(pretrained=False, index=0, **kwargs):
     )
     model.default_cfg = _cfg()
     if pretrained:
-        model.load_state_dict(torch.load("/home/computervision1/Sanoojan/DomainBedS/domainbed/pretrained/cvt/CvT-13-224x224-IN-1k.pth", map_location="cpu"), strict=False)
+        model.load_state_dict(torch.load("domainbed/pretrained/cvt/CvT-13-224x224-IN-1k.pth", map_location="cpu"), strict=False)
     return model
 
 

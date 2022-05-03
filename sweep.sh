@@ -4,14 +4,29 @@ for command in delete_incomplete launch
 do
     python -m domainbed.scripts.sweep $command\
         --data_dir=/share/data/drive_2/DG/data \
-        --output_dir=./domainbed/outputs/MDT/seperateCE_allmask \
-        --command_launcher multi_gpu_0_1\
-        --algorithms MultiDomainDistillation_Dtokens_CE \
+        --output_dir=./domainbed/outputs/New/Deit_Dino_bce2\
+        --command_launcher multi_gpu\
+        --algorithms Deit_Dino \
         --single_test_envs \
         --datasets PACS \
         --n_hparams 1  \
         --n_trials 3 \
-        --skip_confirmation \
-        --hparams """{\"batch_size\":32,\"attn_sep_mask\":1,\"mask_clsT_distT\":1,\"mask_dist_other_patches\":1}""" 
+        --hparams """{\"batch_size\":32}"""\
+        --skip_confirmation  
 done
 
+# for command in delete_incomplete launch
+# do
+#     python -m domainbed.scripts.sweep $command\
+#         --data_dir=/share/data/drive_2/DG/data \
+#         --output_dir=./domainbed/outputs/New/Deit_Dino_ch5 \
+#         --command_launcher multi_gpu_0_1\
+#         --algorithms Deit_Dino_jac \
+#         --single_test_envs \
+#         --datasets PACS \
+#         --n_hparams 1  \
+#         --n_trials 3 \
+#         --skip_confirmation 
+# done
+
+# --hparams """{\"batch_size\":32,\"Wd\":1.5,\"temp\":1.5,\"attn_sep_mask\":1,\"mask_clsT_distT\":1,\"mask_dist_other_patches\":0}""" 

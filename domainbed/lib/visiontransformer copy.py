@@ -196,24 +196,18 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-    def forward(self, x,return_attention=False):
-        if(return_attention and self.training):
-            x,attns=x
+    def forward(self, x):
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv.unbind(0)   # make torchscript happy (cannot use tensor as tuple)
 
         attn = (q @ k.transpose(-2, -1)) * self.scale
-        if(return_attention and self.training):
-            attns.append(attn)
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
-        
+
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
-        if(return_attention and self.training):
-            return x,attns
         return x
 
 
@@ -230,18 +224,9 @@ class Block(nn.Module):
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
-    def forward(self, x,return_attention=False):
-        if(return_attention and self.training):
-            x_orig,attns=x
-            x=self.norm1(x_orig),attns
-            x,attns=self.attn(x,return_attention=return_attention)
-            x = x_orig + self.drop_path(x)
-        else:
-            x = x + self.drop_path(self.attn(self.norm1(x)))
+    def forward(self, x):
+        x = x + self.drop_path(self.attn(self.norm1(x)))
         x = x + self.drop_path(self.mlp(self.norm2(x)))
-
-        if(return_attention):
-            return x,attns
         return x
 
 
@@ -358,8 +343,7 @@ class VisionTransformer(nn.Module):
         if self.num_tokens == 2:
             self.head_dist = nn.Linear(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity()
 
-    def forward_features(self, x,return_tokens=False,return_attention=False):
-
+    def forward_features(self, x):
         x = self.patch_embed(x)
         cls_token = self.cls_token.expand(x.shape[0], -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         if self.dist_token is None:
@@ -367,56 +351,28 @@ class VisionTransformer(nn.Module):
         else:
             x = torch.cat((cls_token, self.dist_token.expand(x.shape[0], -1, -1), x), dim=1)
         x = self.pos_drop(x + self.pos_embed)
-        if(return_attention):
-            attns=[]
-            
-            for blk in self.blocks:
-                x=x,attns
-                x,attns = blk(x,return_attention=return_attention)
-            # x,attns = self.blocks(x,return_attention=return_attention)
-        else:
-            x = self.blocks(x)
+        # x = self.blocks(x)
+        for id,blk in enumerate(self.blocks):
+            # if(id==0):
+            #     continue   
+            x = blk(x)
+
         x = self.norm(x)
         if self.dist_token is None:
-            if(return_tokens and self.training):
-                return self.pre_logits(x[:, 0]),x
-            elif(return_attention and self.training):
-                return self.pre_logits(x[:, 0]),attns
             return self.pre_logits(x[:, 0])
         else:
-            if(return_tokens and self.training):
-                return x[:, 0], x[:, 1],x
-            elif(return_attention and self.training):
-                return x[:, 0], x[:, 1],attns
             return x[:, 0], x[:, 1]
 
-    def forward(self, x,return_tokens=False,return_attention=False):
-        
-        if(not self.training):
-            return_attention=False
-        x = self.forward_features(x,return_tokens=return_tokens,return_attention=return_attention)
-        if(return_attention and self.training):
-            x,attns=x
-            
-        if(return_tokens and self.training):
-            x_tokens=x[-1]
+    def forward(self, x):
+        x = self.forward_features(x)
         if self.head_dist is not None:
             x, x_dist = self.head(x[0]), self.head_dist(x[1])  # x must be a tuple
             if self.training and not torch.jit.is_scripting():
                 # during inference, return the average of both classifier predictions
-                if(return_tokens):
-                    return x, x_dist,x_tokens
-                elif(return_attention):
-                    return x, x_dist,attns
                 return x, x_dist
             else:
                 return (x + x_dist) / 2
         else:
-            if(return_tokens and self.training):
-                return self.head(x[0]),x_tokens
-            elif(return_attention and self.training and not torch.jit.is_scripting()):
-                return self.head(x),attns
-                
             x = self.head(x)
         return x
 
