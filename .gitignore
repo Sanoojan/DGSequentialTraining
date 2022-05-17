@@ -27,3 +27,11 @@ domainbed/pretrained/
 Sweep_PACS.sh
 data_small/
 img_outs/
+tsne/
+TsneFIG/
+TsneFIG2/
+TsneFIG4/
+TsneFIG5/
+TsneDeit/
+TsneNew/
+TsneNew2/

@@ -326,7 +326,9 @@ class MDVisionTransformer(nn.Module):
             self.pre_logits = nn.Identity()
 
         # Classifier head(s)
-        self.head = nn.Linear(self.num_features, num_classes) if num_classes > 0 else nn.Identity()
+
+        self.head = nn.Linear(self.num_features, num_classes) if num_classes > 0 else nn.Identity()  
+        self.concHead= nn.Linear(self.num_features*2, num_classes) if num_classes > 0 else nn.Identity()  #  for concatenatinated feat 
         self.head_dists = None
         if distilled:
             self.head_dists =nn.ModuleList([nn.Linear(self.embed_dim, self.num_classes).to("cuda") if num_classes > 0 else nn.Identity() for _ in range(num_dist_token)]) 
@@ -386,11 +388,17 @@ class MDVisionTransformer(nn.Module):
         else:
             return x[:, 0], x[:, -self.num_dist_token:]
 
-    def forward(self, x,return_dist_inf=False):
+    def forward(self, x,return_dist_inf=False,concat_feat=False,return_cls_dist_feat=False):
         x = self.forward_features(x)
         if self.head_dists is not None:
-            x, x_dist = self.head(x[0]), torch.stack([self.head_dists[i](x[1][:,i]) for i in range(self.num_dist_token)],dim=1)  # x must be a tuple
-            if (self.training and not torch.jit.is_scripting()) or return_dist_inf:
+            if concat_feat:
+                #concatenated only 1st token change
+                x, x_dist = self.concHead(torch.cat((x[0],x[1][:,0]),dim=1)), torch.stack([self.head_dists[i](x[1][:,i]) for i in range(self.num_dist_token)],dim=1)  # x must be a tuple
+            else:
+                x, x_dist,cls_feat,dist_feat = self.head(x[0]), torch.stack([self.head_dists[i](x[1][:,i]) for i in range(self.num_dist_token)],dim=1),x[0],x[1]  # x must be a tuple
+            if return_cls_dist_feat:
+                return x,x_dist,cls_feat,dist_feat
+            elif (self.training and not torch.jit.is_scripting()) or return_dist_inf:
                 # during inference, return the average of both classifier predictions
                 return x, x_dist
             else:

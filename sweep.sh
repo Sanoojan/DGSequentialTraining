@@ -4,9 +4,9 @@ for command in delete_incomplete launch
 do
     python -m domainbed.scripts.sweep $command\
         --data_dir=/share/data/drive_2/DG/data \
-        --output_dir=./domainbed/outputs/New/Deit_Dino_bce2\
+        --output_dir=./domainbed/outputs/DGT/Deit_simple_augmix\
         --command_launcher multi_gpu\
-        --algorithms Deit_Dino \
+        --algorithms Deit_simple_augmix \
         --single_test_envs \
         --datasets PACS \
         --n_hparams 1  \

@@ -107,7 +107,7 @@ def one_train_rest_test_combinations(n):
         yield list(env)
 
 def make_args_list(n_trials, dataset_names, algorithms, n_hparams_from, n_hparams, steps,
-    data_dir, task, holdout_fraction, single_test_envs,one_train_rest_test, hparams,confusion_matrix,test_robustness,accuracy):
+    data_dir, task, holdout_fraction, single_test_envs,one_train_rest_test, hparams,confusion_matrix,test_robustness,accuracy,tsne):
     args_list = []
     for trial_seed in range(n_trials):
         for dataset in dataset_names:
@@ -171,6 +171,7 @@ if __name__ == "__main__":
     parser.add_argument('--confusion_matrix', type=bool, default=False)
     parser.add_argument('--test_robustness', type=bool, default=False)
     parser.add_argument('--accuracy', type=bool, default=True)
+    parser.add_argument('--tsne', type=bool, default=True)
     args = parser.parse_args()
 
     args_list = make_args_list(
@@ -188,7 +189,8 @@ if __name__ == "__main__":
         hparams=args.hparams,
         confusion_matrix=args.confusion_matrix,
         test_robustness=args.test_robustness,
-        accuracy=args.accuracy
+        accuracy=args.accuracy,
+        tsne=args.tsne
     )
 
     jobs = [Job(train_args, args.output_dir) for train_args in args_list]
@@ -207,7 +209,7 @@ if __name__ == "__main__":
         print(f'About to Test {len(to_launch)} jobs.')
         if not args.skip_confirmation:
             ask_for_confirmation()
-        launcher_fn = command_launchers.REGISTRY["multi_gpu"]
+        launcher_fn = command_launchers.REGISTRY[args.command_launcher]
         Job.launch(to_launch, launcher_fn)
 
       

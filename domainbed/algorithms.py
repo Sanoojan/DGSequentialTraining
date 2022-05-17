@@ -14,6 +14,7 @@ from domainbed.lib.visiontransformer import *
 from domainbed.lib.cross_visiontransformer import CrossVisionTransformer
 from domainbed.lib.MCT import MCVisionTransformer
 from domainbed.lib.MDT import MDVisionTransformer
+from domainbed.lib.DGT import DGVisionTransformer
 from domainbed.lib.cvt import tiny_cvt,small_cvt
 from torch.nn.functional import interpolate
 import domainbed.lib.Dino_vit as dino
@@ -53,7 +54,8 @@ ALGORITHMS = [
     'Deit_DomInv',
     'MDT_self_dist_wCE',
     'Deit_Dino',
-    'Deit_Dino_jac'
+    'Deit_Dino_jac',
+    'Deit_simple_augmix'
 
 ]
 
@@ -426,14 +428,16 @@ class Deit_dist(Algorithm):
         self.temp=self.hparams['temp']
         self.Wd=self.hparams['Wd']
         # All teacher model paths. Domains should be in order ACPS
-        teachers=['domainbed/outputs/PACS/erm/56ca19b798087be4998b8b46ef3281f7/best_val_model_testdom_[0]_0.9709.pkl','domainbed/outputs/PACS/erm/10b4762ab54115af03884b99e5a136ed/best_val_model_testdom_[1]_0.9690.pkl','domainbed/outputs/PACS/erm/89d41edbd75abb12dcf9fd0bfc1061ed/best_val_model_testdom_[2]_0.9591.pkl','domainbed/outputs/PACS/erm/0d52a60924ea5be50a0ca63e1ad8d55e/best_val_model_testdom_[3]_0.9674.pkl']
-        print(teachers[queue_var.current_test_env[0]])
-        self.Teachnetwork=load_model(teachers[queue_var.current_test_env[0]]).to("cuda") 
+        # teachers=['domainbed/outputs/PACS/erm/56ca19b798087be4998b8b46ef3281f7/best_val_model_testdom_[0]_0.9709.pkl','domainbed/outputs/PACS/erm/10b4762ab54115af03884b99e5a136ed/best_val_model_testdom_[1]_0.9690.pkl','domainbed/outputs/PACS/erm/89d41edbd75abb12dcf9fd0bfc1061ed/best_val_model_testdom_[2]_0.9591.pkl','domainbed/outputs/PACS/erm/0d52a60924ea5be50a0ca63e1ad8d55e/best_val_model_testdom_[3]_0.9674.pkl']
+        # print(teachers[queue_var.current_test_env[0]])
+        # self.Teachnetwork=load_model(teachers[queue_var.current_test_env[0]]).to("cuda") 
     
 
     def update(self, minibatches, unlabeled=None):
         all_x = torch.cat([x for x,y in minibatches])
         all_y = torch.cat([y for x,y in minibatches])
+
+
         loss=0
         pred,pred_dist=self.predictTrain(all_x)
         pred_dist=pred_dist[:,0]
@@ -441,9 +445,11 @@ class Deit_dist(Algorithm):
         t = self.temp
         Wd=self.Wd
 
+
+        # changed for self distillation
         loss+= Wd* F.kl_div(
             F.log_softmax(pred_dist / t, dim=1),
-            F.log_softmax(self.predictTeacher(self.Teachnetwork,all_x) / t, dim=1),
+            F.log_softmax(pred/t, dim=1),
             reduction='sum',
             log_target=True
         ) * (t * t) / pred_dist.numel()
@@ -457,21 +463,94 @@ class Deit_dist(Algorithm):
 
        
     def predictTrain(self, x):
-        return self.network(x)
+        return self.network(x,concat_feat=True)
     def predictTeacher(self,net, x):
         return net.predict(x)
     def predict(self, x):
-        out,out_dist= self.network(x,return_dist_inf=True)
+        out,out_dist= self.network(x)
         return out
-        m=nn.Softmax(dim=1)
-        weighted_out=-torch.sum(torch.nn.functional.log_softmax(out,dim=1)*m(out),dim=1).view(-1,1).expand(-1,out.shape[1])*out
-        for i in range(out_dist.shape[1]):
-            weighted_out+=-torch.sum(torch.nn.functional.log_softmax(out_dist[:,i],dim=1)*m(out_dist[:,i]),dim=1).view(-1,1).expand(-1,out.shape[1])*out_dist[:,i]
-        return weighted_out        
-        # weighted_out=torch.max(m(out),1).values.view(-1,1).expand(-1,out.shape[1])*out
-        # for i in range(out_dist.shape[1]):
-        #     weighted_out+=torch.max(m(out_dist[:,i]),1).values.view(-1,1).expand(-1,out.shape[1])*out_dist[:,i]
-        # return weighted_out
+
+
+class Deit_augmix_seperate(Algorithm):
+    """
+    Deit_dist; Order of domains in training should be preserved
+    """
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(Deit_augmix_seperate,self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+       
+        self.num_domains=num_domains
+        network_deit=deit_small_patch16_224(pretrained=True) 
+        network_deit.head = nn.Linear(384, num_classes)
+        # network_deit.head_dist = nn.Linear(384, num_classes)  # reinitialize the last layer for distillation
+        attn_sep_mask=self.hparams["attn_sep_mask"]
+    
+        self.network=MDVisionTransformer(img_size=224,num_classes=num_classes, distilled=True,patch_size=16, embed_dim=384, depth=12, num_heads=6,num_dist_token=1,attn_sep_mask=attn_sep_mask)
+        self.network.load_state_dict(network_deit.state_dict(),strict=False) 
+        printNetworkParams(self.network)
+        self.optimizer = torch.optim.Adam(
+            self.network.parameters(),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.temp=self.hparams['temp']
+        self.Wd=self.hparams['Wd']
+        # All teacher model paths. Domains should be in order ACPS
+        # teachers=['domainbed/outputs/PACS/erm/56ca19b798087be4998b8b46ef3281f7/best_val_model_testdom_[0]_0.9709.pkl','domainbed/outputs/PACS/erm/10b4762ab54115af03884b99e5a136ed/best_val_model_testdom_[1]_0.9690.pkl','domainbed/outputs/PACS/erm/89d41edbd75abb12dcf9fd0bfc1061ed/best_val_model_testdom_[2]_0.9591.pkl','domainbed/outputs/PACS/erm/0d52a60924ea5be50a0ca63e1ad8d55e/best_val_model_testdom_[3]_0.9674.pkl']
+        # print(teachers[queue_var.current_test_env[0]])
+        # self.Teachnetwork=load_model(teachers[queue_var.current_test_env[0]]).to("cuda") 
+    
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+
+        train_queues=UpdateClsTrainQueues(minibatches) # Load data class wise
+        nclass=len(train_queues)
+        ndomains=len(train_queues[0])
+        
+        cross_learning_data=[]  
+        cross_learning_labels=[]
+        for dom_n in range(ndomains):
+            for i in range(queue_sz) :
+                for cls in range(nclass):
+                    cross_learning_data.append(train_queues[cls][dom_n][i])
+                    cross_learning_labels.append(cls)
+
+        cross_learning_data=torch.stack(cross_learning_data)
+        cross_learning_labels=torch.tensor(cross_learning_labels).to("cuda")
+
+        loss=0
+        pred,pred_dist,cls_feat,dtok_feat=self.predictTrain(cross_learning_data)
+        loss+= F.cross_entropy(pred,cross_learning_labels)
+        t = self.temp
+        Wd=self.Wd
+
+        # cls_feat=torch.chunk(dtok_feat[:,0],chunks=self.num_domains,dim=0)
+        # clsTft0,clsTft1,clsTft2 = F.softmax(cls_feat[0], dim=1), F.softmax(cls_feat[1], dim=1), F.softmax(cls_feat[2], dim=1)
+        
+        dtok_feat=torch.chunk(dtok_feat[:,0],chunks=self.num_domains,dim=0)
+        domft0,domft1,domft2 = F.softmax(dtok_feat[0], dim=1), F.softmax(dtok_feat[1], dim=1), F.softmax(dtok_feat[2], dim=1)
+
+        # Clamp mixture distribution to avoid exploding KL divergence
+        domInvFtAvg = torch.clamp((domft0 + domft1 + domft2) / 3., 1e-7, 1).log()
+        loss += Wd * (F.kl_div(domInvFtAvg, domft0, reduction='batchmean') +
+                        F.kl_div(domInvFtAvg, domft1, reduction='batchmean') +
+                        F.kl_div(domInvFtAvg, domft2, reduction='batchmean')) / 3.
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return {'loss': loss.item()}
+
+       
+    def predictTrain(self, x):
+        return self.network(x,return_cls_dist_feat=True)
+    def predictTeacher(self,net, x):
+        return net.predict(x)
+    def predict(self, x):
         out,out_dist= self.network(x,return_dist_inf=True)
         return out
 
@@ -486,11 +565,11 @@ class Deit_DomInv(Algorithm):
        
         self.num_domains=num_domains
         network_deit=deit_small_patch16_224(pretrained=True) 
-        network_deit.head = nn.Linear(384, num_classes)
+        network_deit.head = nn.Linear(384*2, num_classes)
         # network_deit.head_dist = nn.Linear(384, num_classes)  # reinitialize the last layer for distillation
         attn_sep_mask=self.hparams["attn_sep_mask"]
-    
-        self.network=MDVisionTransformer(img_size=224,num_classes=num_classes, distilled=True,patch_size=16, embed_dim=384, depth=12, num_heads=6,num_dist_token=2,attn_sep_mask=attn_sep_mask)
+        mask_clsT_distT=self.hparams["mask_clsT_distT"]
+        self.network=DGVisionTransformer(img_size=224,num_classes=num_classes, distilled=True,patch_size=16, embed_dim=384, depth=12, num_heads=6,num_dist_token=2,attn_sep_mask=attn_sep_mask,mask_clsT_distT=mask_clsT_distT)
         self.network.load_state_dict(network_deit.state_dict(),strict=False) 
         printNetworkParams(self.network)
         self.optimizer = torch.optim.Adam(
@@ -500,6 +579,7 @@ class Deit_DomInv(Algorithm):
         )
         self.temp=self.hparams['temp']
         self.Wd=self.hparams['Wd']
+
         # All teacher model paths. Domains should be in order ACPS
         teachers=['domainbed/outputs/PACS/erm/56ca19b798087be4998b8b46ef3281f7/best_val_model_testdom_[0]_0.9709.pkl','domainbed/outputs/PACS/erm/10b4762ab54115af03884b99e5a136ed/best_val_model_testdom_[1]_0.9690.pkl','domainbed/outputs/PACS/erm/89d41edbd75abb12dcf9fd0bfc1061ed/best_val_model_testdom_[2]_0.9591.pkl','domainbed/outputs/PACS/erm/0d52a60924ea5be50a0ca63e1ad8d55e/best_val_model_testdom_[3]_0.9674.pkl']
         print(teachers[queue_var.current_test_env[0]])
@@ -513,33 +593,52 @@ class Deit_DomInv(Algorithm):
         nclass=len(train_queues)
         ndomains=len(train_queues[0])
         
-        cross_learning_data=[[] for i in range(ndomains)]  
+        cross_learning_data=[]  
         cross_learning_labels=[]
-        for cls in range(nclass):
+        for dom_n in range(ndomains):
             for i in range(queue_sz) :
-                for dom_n in range(ndomains):
-                    cross_learning_data[dom_n].append(train_queues[cls][dom_n][i])
+                for cls in range(nclass):
+                    cross_learning_data.append(train_queues[cls][dom_n][i])
                     cross_learning_labels.append(cls)
 
-        cross_learning_data=[torch.stack(data) for data in cross_learning_data]
+        cross_learning_data=torch.stack(cross_learning_data)
         cross_learning_labels=torch.tensor(cross_learning_labels).to("cuda")
 
 
-
         loss=0
-        pred,pred_dist=self.predictTrain(cross_learning_data)
-        pred_dist=pred_dist[:,0]
-        loss+= F.cross_entropy(pred,all_y)
+        pred,pred_dist,dom_inv_feat,dom_spec_feat=self.predict(cross_learning_data)
+        pred_dist=pred_dist
+        loss+= F.cross_entropy(pred,cross_learning_labels)
         t = self.temp
         Wd=self.Wd
 
         loss+= Wd* F.kl_div(
             F.log_softmax(pred_dist / t, dim=1),
-            F.log_softmax(self.predictTeacher(self.Teachnetwork,all_x) / t, dim=1),
+            F.log_softmax(pred / t, dim=1),
             reduction='sum',
             log_target=True
         ) * (t * t) / pred_dist.numel()
 
+        dom_inv_feat_ch=torch.chunk(dom_inv_feat,chunks=ndomains,dim=0)
+        domft0,domft1,domft2 = F.softmax(dom_inv_feat_ch[0], dim=1), F.softmax(dom_inv_feat_ch[1], dim=1), F.softmax(dom_inv_feat_ch[2], dim=1)
+
+        # Clamp mixture distribution to avoid exploding KL divergence
+        domInvFtAvg = torch.clamp((domft0 + domft1 + domft2) / 3., 1e-7, 1).log()
+        loss += 25 * (F.kl_div(domInvFtAvg, domft0, reduction='batchmean') +
+                        F.kl_div(domInvFtAvg, domft1, reduction='batchmean') +
+                        F.kl_div(domInvFtAvg, domft2, reduction='batchmean')) / 3.
+        
+        # mdi_z = torch.mean(dom_inv_feat, 0)
+        # mds_z = torch.mean(dom_spec_feat, 0)
+
+        # di_z_n = dom_inv_feat - mdi_z[None, :]
+        # ds_z_n = dom_spec_feat - mds_z[None, :]
+        # C = di_z_n[:, :, None] * ds_z_n[:, None, :]
+
+        # target_cr = torch.zeros(C.shape[0], C.shape[1], C.shape[2]).cuda()
+        # disentangle_loss = nn.MSELoss()(C, target_cr)
+
+        # loss+=25.0*disentangle_loss
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -548,13 +647,86 @@ class Deit_DomInv(Algorithm):
         return {'loss': loss.item()}
 
        
-    def predictTrain(self, x):
+    def predict(self, x):
         return self.network(x)
     def predictTeacher(self,net, x):
         return net.predict(x)
+    # def predict(self, x):
+    #     out,out_dist= self.network(x,return_dist_inf=True)
+    #     return out
+
+class Deit_simple_augmix(Algorithm):
+    """
+    Deit_dist; Order of domains in training should be preserved
+    """
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(Deit_simple_augmix,self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+       
+        self.network = deit_small_patch16_224(pretrained=True)
+        self.network.head = nn.Linear(384, num_classes)
+        self.optimizer = torch.optim.AdamW(
+            self.network.parameters(),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+
+        self.num_domains=num_domains
+
+        self.temp=self.hparams['temp']
+        self.Wd=self.hparams['Wd']
+
+
+    
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        train_queues=UpdateClsTrainQueues(minibatches) # Load data class wise
+        nclass=len(train_queues)
+        ndomains=len(train_queues[0])
+        
+        cross_learning_data=[]  
+        cross_learning_labels=[]
+        for dom_n in range(ndomains):
+            for i in range(queue_sz) :
+                for cls in range(nclass):
+                    cross_learning_data.append(train_queues[cls][dom_n][i])
+                    cross_learning_labels.append(cls)
+
+        cross_learning_data=torch.stack(cross_learning_data)
+        cross_learning_labels=torch.tensor(cross_learning_labels).to("cuda")
+
+
+        loss=0
+        pred,features=self.predict(cross_learning_data)
+        loss+= F.cross_entropy(pred,cross_learning_labels)
+        t = self.temp
+        Wd=self.Wd
+
+        
+        features=torch.chunk(features,chunks=ndomains,dim=0)
+        domft0,domft1,domft2 = F.softmax(features[0], dim=1), F.softmax(features[1], dim=1), F.softmax(features[2], dim=1)
+
+        # Clamp mixture distribution to avoid exploding KL divergence
+        domInvFtAvg = torch.clamp((domft0 + domft1 + domft2) / 3., 1e-7, 1).log()
+        loss += Wd * (F.kl_div(domInvFtAvg, domft0, reduction='batchmean') +
+                        F.kl_div(domInvFtAvg, domft1, reduction='batchmean') +
+                        F.kl_div(domInvFtAvg, domft2, reduction='batchmean')) / 3.
+        
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return {'loss': loss.item()}
+
+
+
     def predict(self, x):
-        out,out_dist= self.network(x,return_dist_inf=True)
-        return out
+        return self.network(x,return_cls_feat=True)
+
 
 class MultiDomainDistillation_Dtokens(Algorithm):
     """
@@ -991,26 +1163,26 @@ class Deit_Dino(Algorithm):
 
         # cos=nn.CosineSimilarity(dim=1, eps=1e-6)
         # seg_loss= 1-torch.mean(cos(last_attn_ori, attentions))
-        seg_loss=similarityCE(last_attn_ori,attentions)
+        # seg_loss=similarityCE(last_attn_ori,attentions)
 
         # seg_loss=dice_loss(th_attn.long(),last_attn)
         # seg_loss=F.binary_cross_entropy_with_logits(last_attn, th_attn,pos_weight=torch.tensor(10.0))
         self.cnt+=1
         t=1.0
         Wd=1.0
-        # seg_loss= Wd* F.kl_div(
-        #             F.log_softmax(last_attn_ori/ t, dim=1),
-        #             torch.log(attentions),
-        #             reduction='sum',
-        #             log_target=True
-        #         ) * (t * t) / attentions.numel()
+        seg_loss= Wd* F.kl_div(
+                    F.softmax(last_attn_ori/ t, dim=1),
+                    F.log_softmax(attentions, dim=1),
+                    reduction='sum',
+                    log_target=True
+                ) * (t * t) / attentions.numel()
 
-        # seg_loss+= Wd* F.kl_div(
-        #             torch.log(attentions),
-        #             F.LogSoftmax(last_attn_ori/ t, dim=1),
-        #             reduction='sum',
-        #             log_target=True
-        #         ) * (t * t) / attentions.numel()
+        seg_loss+= Wd* F.kl_div(
+                    F.log_softmax(attentions, dim=1),
+                    F.softmax(last_attn_ori/ t, dim=1),
+                    reduction='sum',
+                    log_target=True
+                ) * (t * t) / attentions.numel()
 
         loss+=seg_loss
         # print(seg_loss)
@@ -1046,35 +1218,14 @@ class Deit_Dino_jac(Algorithm):
         all_y = torch.cat([y for x,y in minibatches])
 
         pred,pred_attn=self.predict(all_x)  # For vit small( no dist)
+        last_attn=pred_attn[-1] # attention from last block
+        target_attn=self.dino_small.get_last_selfattention(all_x)
+
+        seg_loss2=get_jaccard_loss_from_attention(last_attn,target_attn)
+        # print("jac",seg_loss2 )
     
-        last_attn=pred_attn[-1]
-        last_attn=last_attn[:,:,0,1:]
-        last_attn = torch.mean(last_attn,dim=1).reshape(-1,1,14, 14).float()
-        # last_attn = last_attn.reshape(-1,6,14, 14).float()
         loss = F.cross_entropy(pred, all_y)
-
-        attentions=self.dino_small.get_last_selfattention(all_x)
-        attentions = attentions[:, :, 0, 1:]
-        attentions=torch.mean(attentions,dim=1)
-        threshold=0.75
-        val, idx = torch.sort(attentions)
-        B=attentions.shape[0]
-        val /= torch.sum(val, dim=1, keepdim=True)
-        cum_val = torch.cumsum(val, dim=1)
-        th_attn = cum_val > (1 - threshold)
-        idx2 = torch.argsort(idx)
-        for sample in range(B):
-            th_attn[sample] = th_attn[sample][idx2[sample]]
-        th_attn = th_attn.reshape(B,14,14).long()
-        
-        
-        seg_loss=jaccard_loss(th_attn,last_attn)
-
-        # last_attn=torch.mean(last_attn,dim=1).reshape(-1,196)
-        # seg_loss= 1-compute_jaccard(last_attn,attentions)
-
-      
-        loss+=seg_loss
+        loss+=seg_loss2
 
 
         self.optimizer.zero_grad()
@@ -1311,40 +1462,6 @@ def get_per_sample_jaccard(pred, target):
         object_count += 1
     return jac / object_count
 
-def jaccard_loss(true, logits, eps=1e-7):
-    """Computes the Jaccard loss, a.k.a the IoU loss.
-    Note that PyTorch optimizers minimize a loss. In this
-    case, we would like to maximize the jaccard loss so we
-    return the negated jaccard loss.
-    Args:
-        true: a tensor of shape [B, H, W] or [B, 1, H, W].
-        logits: a tensor of shape [B, C, H, W]. Corresponds to
-            the raw output or logits of the model.
-        eps: added to the denominator for numerical stability.
-    Returns:
-        jacc_loss: the Jaccard loss.
-    """
-    num_classes = logits.shape[1]
-    if num_classes == 1:
-        true_1_hot = torch.eye(num_classes + 1)[true.squeeze(1)]
-        true_1_hot = true_1_hot.permute(0, 3, 1, 2).float()
-        true_1_hot_f = true_1_hot[:, 0:1, :, :]
-        true_1_hot_s = true_1_hot[:, 1:2, :, :]
-        true_1_hot = torch.cat([true_1_hot_s, true_1_hot_f], dim=1)
-        pos_prob = torch.sigmoid(logits)
-        neg_prob = 1 - pos_prob
-        probas = torch.cat([pos_prob, neg_prob], dim=1)
-    else:
-        true_1_hot = torch.eye(num_classes)[true.squeeze(1)]
-        true_1_hot = true_1_hot.permute(0, 3, 1, 2).float()
-        probas = F.softmax(logits, dim=1)
-    true_1_hot = true_1_hot.type(logits.type())
-    dims = (0,) + tuple(range(2, true.ndimension()))
-    intersection = torch.sum(probas * true_1_hot, dims)
-    cardinality = torch.sum(probas + true_1_hot, dims)
-    union = cardinality - intersection
-    jacc_loss = (intersection / (union + eps)).mean()
-    return (1 - jacc_loss)
 
 def compute_jaccard(attentions_Batch,target_batch):
     # make the image divisible by the patch size
@@ -1352,13 +1469,12 @@ def compute_jaccard(attentions_Batch,target_batch):
     # target_batch:B,nh,196
     w_featmap = 14
     h_featmap = 14
-    nh=6
+    nh=attentions_Batch.shape[1]
     # th_attn_all=[]
     threshold=0.75
     patch_size=16
     jacc_val=0
-    # attentions=model.get_last_selfattention(image.cuda())
-    # attentions_all = model.forward_selfattention(image.cuda(),return_all_attention=True) # change here
+
     for b in range(attentions_Batch.shape[0]):
         attentions=attentions_Batch[b,:,:]
         
@@ -1379,8 +1495,6 @@ def compute_jaccard(attentions_Batch,target_batch):
         # interpolate
         th_attn = interpolate(th_attn.unsqueeze(0), scale_factor=patch_size, mode="nearest")[0]
 
-        # th_attn_all.append(th_attn)
-
         target=target_batch[b,:,:]
         target = target.reshape(nh, -1)
 
@@ -1400,6 +1514,7 @@ def compute_jaccard(attentions_Batch,target_batch):
     jacc_val=jacc_val/(attentions_Batch.shape[0]*1.0)
 
     return jacc_val
+
 
 
 def dice_loss(true, logits, eps=1e-7):
@@ -1436,3 +1551,61 @@ def dice_loss(true, logits, eps=1e-7):
     dice_loss = (2. * intersection / (cardinality + eps)).mean()
     return (1 - dice_loss)
 
+def jaccard_loss(true, logits, eps=1e-7):
+    """Computes the Jaccard loss, a.k.a the IoU loss.
+    Note that PyTorch optimizers minimize a loss. In this
+    case, we would like to maximize the jaccard loss so we
+    return the negated jaccard loss.
+    Args:
+        true: a tensor of shape [B, H, W] or [B, 1, H, W].
+        logits: a tensor of shape [B, C, H, W]. Corresponds to
+            the raw output or logits of the model.
+        eps: added to the denominator for numerical stability.
+    Returns:
+        jacc_loss: the Jaccard loss.
+    """
+    num_classes = logits.shape[1]
+    if num_classes == 1:
+        true_1_hot = torch.eye(num_classes + 1)[true.squeeze(1)]
+        true_1_hot = true_1_hot.permute(0, 3, 1, 2).float()
+        true_1_hot_f = true_1_hot[:, 0:1, :, :]
+        true_1_hot_s = true_1_hot[:, 1:2, :, :]
+        true_1_hot = torch.cat([true_1_hot_s, true_1_hot_f], dim=1)
+        pos_prob = torch.sigmoid(logits)
+        neg_prob = 1 - pos_prob
+        probas = torch.cat([pos_prob, neg_prob], dim=1)
+    else:
+        true_1_hot = torch.eye(num_classes)[true.squeeze(1)]
+        true_1_hot = true_1_hot.permute(0, 3, 1, 2).float()
+        probas = F.softmax(logits, dim=1)
+    true_1_hot = true_1_hot.type(logits.type())
+    dims = (0,) + tuple(range(2, true.ndimension()))
+    intersection = torch.sum(probas * true_1_hot, dims)
+    cardinality = torch.sum(probas + true_1_hot, dims)
+    union = cardinality - intersection
+    jacc_loss = (intersection / (union + eps)).mean()
+    return (1 - jacc_loss)
+
+def get_jaccard_loss_from_attention(pred_attn,target_attn,threshold=0.75,N_patch=14):
+    '''
+    pred_attn: predicted attentions [B, H, N,N]  Eg: B,6,197,197
+    target_attn: target attentions [B, H, N,N]
+    '''
+    pred_attn=pred_attn[:,:,0,1:] #cls token attention
+    target_attn = target_attn[:, :, 0, 1:] #cls token attention
+
+    pred_attn = torch.mean(pred_attn,dim=1).reshape(-1,1,N_patch, N_patch).float() # mean over heads 
+
+    target_attn=torch.mean(target_attn,dim=1)
+    val, idx = torch.sort(target_attn)
+    B=target_attn.shape[0]
+    val /= torch.sum(val, dim=1, keepdim=True)
+    cum_val = torch.cumsum(val, dim=1)
+    th_attn = cum_val > (1 - threshold)
+    idx2 = torch.argsort(idx)
+    for sample in range(B):
+        th_attn[sample] = th_attn[sample][idx2[sample]]
+    th_attn = th_attn.reshape(B,N_patch,N_patch).long()
+
+
+    return jaccard_loss(th_attn,pred_attn)

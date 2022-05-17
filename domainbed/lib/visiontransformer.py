@@ -209,6 +209,8 @@ class Attention(nn.Module):
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
         
+        
+        
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
@@ -390,7 +392,7 @@ class VisionTransformer(nn.Module):
                 return x[:, 0], x[:, 1],attns
             return x[:, 0], x[:, 1]
 
-    def forward(self, x,return_tokens=False,return_attention=False):
+    def forward(self, x,return_tokens=False,return_attention=False,return_cls_feat=False):
         
         if(not self.training):
             return_attention=False
@@ -416,7 +418,8 @@ class VisionTransformer(nn.Module):
                 return self.head(x[0]),x_tokens
             elif(return_attention and self.training and not torch.jit.is_scripting()):
                 return self.head(x),attns
-                
+            elif(return_cls_feat): #removed self.training for tsne purpose
+                return self.head(x),x
             x = self.head(x)
         return x
 

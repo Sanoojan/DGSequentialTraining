@@ -10,12 +10,17 @@ import random
 import sys
 import time
 import uuid
+from collections import Counter
 
 import numpy as np
 import PIL
 import torch
 import torchvision
 import torch.utils.data
+import matplotlib.pyplot as plt
+import seaborn as sn
+from sklearn.manifold import TSNE
+from sklearn.decomposition import PCA
 
 from domainbed import datasets
 from domainbed import hparams_registry
@@ -38,6 +43,89 @@ def load_model(fname):
     
     algorithm.load_state_dict(dump["model_dict"])
     return algorithm
+
+def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
+              filename: str,domain_labels=['Art','Cartoon','Photo','Sketch']):
+    
+
+    labels=np.array(labels)
+    features=np.array(features)
+    X_tsne = TSNE(n_components=2, random_state=33,init='pca').fit_transform(features)
+    X_PCA=PCA(n_components=2).fit_transform(features)
+    # domain labels, 1 represents source while 0 represents target
+    
+
+    # visualize using matplotlib
+    fig, ax = plt.subplots(figsize=(10, 10))
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+ 
+    labelscls=labels%10
+    palette = sn.color_palette("bright",(np.unique(labelscls)).size)
+    sn.scatterplot(X_tsne[:, 0], X_tsne[:, 1], hue=labelscls, legend='full', palette=palette)
+    plt.setp(ax.get_legend().get_texts(), fontsize='22') # for legend text
+    plt.setp(ax.get_legend().get_title(), fontsize='32') # for legend title
+    # sn.FacetGrid(tsne_df,hue="label",height=10).map(plt.scatter,'Dim_1','Dim_2')
+    # plt.scatter(X_tsne[:, 0], X_tsne[:, 1], c=labels, s=20)
+    plt.xticks([])
+    plt.yticks([])
+    plt.tight_layout()
+    plt.savefig("TsneNew2/clswise"+filename)
+
+    fig, ax = plt.subplots(figsize=(10, 10))
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+    labelsd=labels//10
+    labelsdom=labels*0
+    labelsdom[labelsd==int(args.test_envs[0])]=1
+    named_labels=[]
+    for lab in (labelsd):
+        named_labels.append(domain_labels[int(lab)])
+
+    palette = sn.color_palette("bright", (np.unique(labelsd)).size)
+    sn.scatterplot(X_tsne[:, 0], X_tsne[:, 1], hue=named_labels, legend='full', palette=palette)
+
+    plt.setp(ax.get_legend().get_texts(), fontsize='22') # for legend text
+    plt.setp(ax.get_legend().get_title(), fontsize='32') # for legend title
+    plt.xticks([])
+    plt.yticks([])
+    plt.tight_layout()
+    plt.savefig("TsneNew2/domainwise"+filename)
+
+
+    # fig, ax = plt.subplots(figsize=(10, 10))
+    # ax.spines['top'].set_visible(False)
+    # ax.spines['right'].set_visible(False)
+    # ax.spines['bottom'].set_visible(False)
+    # ax.spines['left'].set_visible(False)
+
+    # palette = sn.color_palette("bright", 2)
+    # sn.scatterplot(X_tsne[:, 0], X_tsne[:, 1], hue=tokenlabels, legend='full', palette=palette)
+    # # sn.FacetGrid(tsne_df,hue="label",height=10).map(plt.scatter,'Dim_1','Dim_2')
+    # # plt.scatter(X_tsne[:, 0], X_tsne[:, 1], c=labels, s=20)
+    # plt.xticks([])
+    # plt.yticks([])
+    # plt.savefig("TsneNew/Itok_"+filename)
+
+
+    #PCA
+    # fig, ax = plt.subplots(figsize=(10, 10))
+    # ax.spines['top'].set_visible(False)
+    # ax.spines['right'].set_visible(False)
+    # ax.spines['bottom'].set_visible(False)
+    # ax.spines['left'].set_visible(False)
+
+    # palette = sn.color_palette("bright", 2)
+    # sn.scatterplot(X_PCA[:, 0], X_PCA[:, 1], hue=tokenlabels, legend='full', palette=palette)
+    # # sn.FacetGrid(tsne_df,hue="label",height=10).map(plt.scatter,'Dim_1','Dim_2')
+    # # plt.scatter(X_tsne[:, 0], X_tsne[:, 1], c=labels, s=20)
+    # plt.xticks([])
+    # plt.yticks([])
+    # plt.savefig("TsneFIG5/PCA_DI_DS"+filename)
 
 
 if __name__ == "__main__":
@@ -65,7 +153,8 @@ if __name__ == "__main__":
     parser.add_argument('--algo_name', type=str, default=None)
     parser.add_argument('--confusion_matrix', type=bool, default=False)
     parser.add_argument('--test_robustness', type=bool, default=False)
-    parser.add_argument('--accuracy', type=bool, default=True)
+    parser.add_argument('--accuracy', type=bool, default=False)
+    parser.add_argument('--tsne', type=bool, default=True)
     
     args = parser.parse_args()
     if(args.pretrained==None):
@@ -118,21 +207,7 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError
 
-    ### DEBUGGING    
-#     print(dataset)
-        
-    # Split each env into an 'in-split' and an 'out-split'. We'll train on
-    # each in-split except the test envs, and evaluate on all splits.
 
-    # To allow unsupervised domain adaptation experiments, we split each test
-    # env into 'in-split', 'uda-split' and 'out-split'. The 'in-split' is used
-    # by collect_results.py to compute classification accuracies.  The
-    # 'out-split' is used by the Oracle model selectino method. The unlabeled
-    # samples in 'uda-split' are passed to the algorithm at training time if
-    # args.task == "domain_adaptation". If we are interested in comparing
-    # domain generalization and domain adaptation results, then domain
-    # generalization algorithms should create the same 'uda-splits', which will
-    # be discared at training.
     in_splits = []
     out_splits = []
     uda_splits = []
@@ -155,6 +230,7 @@ if __name__ == "__main__":
                 uda_weights = misc.make_weights_for_balanced_classes(uda)
         else:
             in_weights, out_weights, uda_weights = None, None, None
+        print()
         in_splits.append((in_, in_weights))
         out_splits.append((out, out_weights))
         if len(uda):
@@ -211,7 +287,7 @@ if __name__ == "__main__":
         algorithm.load_state_dict(algorithm_dict)
 
     algorithm.to(device)
-
+   
     train_minibatches_iterator = zip(*train_loaders)
     uda_minibatches_iterator = zip(*uda_loaders)
     checkpoint_vals = collections.defaultdict(lambda: [])
@@ -251,11 +327,47 @@ if __name__ == "__main__":
 
     evals = zip(eval_loader_names, eval_loaders, eval_weights)
     algo_name=args.algo_name
+
+    name_conv=algo_name+str(args.test_envs)+"_tr"+str(args.trial_seed)+"train_clstokW5"
+    if(args.tsne):
+        if(os.path.exists("tsne/TSVS/meta_"+name_conv+".tsv")):
+            os.remove("tsne/TSVS/meta_"+name_conv+".tsv")
+    Features_all=[]
+    labels_all=[]
+    tokenlabels=[]
     for name, loader, weights in evals:
+        env_name=name[:4]
         if(args.accuracy):
             acc = misc.accuracy(algorithm, loader, weights, device)
             # print(algo_name,":",name,":",acc)
             results[name+'_acc'] = acc
+        elif(args.tsne):
+            if(int(name[3]) in args.test_envs  ):
+                continue
+            if(int(name[3]) not in args.test_envs  and  "in" in name ):
+                continue
+            # if(int(name[3]) in args.test_envs and  "in" in name):
+            #     continue
+            print(name)
+            Features,labels=misc.TsneFeatures(algorithm, loader, weights, device,args.output_dir,env_name,algo_name)
+            
+            with open("tsne/TSVS/records_"+name_conv+"_blk_"+".tsv", "a") as record_file:
+                for i in range(len(labels)):
+                   
+                    Features_all.append(Features[i])
+                    for j in range(len(Features[i])):
+                        
+                        record_file.write(str(Features[i][j]))
+                        record_file.write("\t")
+                    record_file.write("\n")
+         
+            with open("tsne/TSVS/meta_"+name_conv+".tsv", "a") as record_file:
+                for i in range(len(labels)):
+                
+                    labels_all.append(int(str(env_name[-1])+str(labels[i])))
+                    tokenlabels.append("DS") if i<len(labels)/2 else tokenlabels.append("DI")
+                    record_file.write(str(labels[i]))
+                    record_file.write("\n")
         elif (int(name[3]) in args.test_envs and  "in" in name):
             print("name",name)
             env_name=name[:4]
@@ -290,7 +402,8 @@ if __name__ == "__main__":
     algorithm_dict = algorithm.state_dict()
 
     checkpoint_vals = collections.defaultdict(lambda: [])
-
+    if(args.tsne):
+        visualizeEd(Features_all, labels_all,tokenlabels,name_conv+".jpg")
       
 
     with open(os.path.join(args.output_dir, 'done'), 'w') as f:

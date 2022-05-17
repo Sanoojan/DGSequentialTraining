@@ -218,6 +218,68 @@ def confusionMatrix(network, loader, weights, device,output_dir,env_name,algo_na
 
     return correct / total
 
+def TsneFeatures(network, loader, weights, device, output_dir, env_name, algo_name):
+     
+
+    correct = 0
+    total = 0
+    weights_offset = 0
+    network.eval()
+    Features=[]
+    Features2=[]
+    labels=[]
+    if algo_name is None:
+        algo_name = type(network).__name__
+    try:
+        Transnetwork = network.network
+    except:
+        Transnetwork = network.network_original
+    with torch.no_grad():
+        for x, y in loader:
+            x = x.to(device)
+            y = y.to(device)
+
+            # p,x_dist,cls_feat,dist_feat = Transnetwork(x,return_cls_dist_feat=True) #MDT
+            p,cls_feat = Transnetwork(x,return_cls_feat=True) # vit
+            
+
+            # Features.append(dist_feat[:,0])
+            Features.append(cls_feat)
+            # Features2.append(DI)
+            labels.append(y)
+            if weights is None:
+                batch_weights = torch.ones(len(x))
+            else:
+                batch_weights = weights[weights_offset: weights_offset + len(x)]
+                weights_offset += len(x)
+            batch_weights = batch_weights.to(device)
+            if p.size(1) == 1:
+                # if p.size(1) == 1:
+                correct += (p.gt(0).eq(y).float() * batch_weights.view(-1, 1)).sum().item()
+            else:
+                # print('p hai ye', p.size(1))
+                correct += (p.argmax(1).eq(y).float() * batch_weights).sum().item()
+            total += batch_weights.sum().item()
+    network.train()
+    labels=torch.cat(labels).cpu().detach().numpy()
+    # Features_all=[[] for _ in range(12)]
+    # for i in range(len(Features)):
+
+    #     Features_all[i]=torch.cat(Features[i],dim=0).cpu().detach().numpy()
+ 
+    print(labels.shape)
+    Features=torch.cat(Features,dim=0).cpu().detach().numpy()
+    # Features2=torch.cat(Features2,dim=0).cpu().detach().numpy()
+    # Features=np.concatenate((Features,Features2),axis=0)
+    # print(Features.shape)
+    name_conv=env_name
+
+    # print(y)
+    # print(len(y))
+    # print(len(Features))
+    # print(Features[0].shape)
+    return Features,labels
+
 def plot_block_accuracy2(network, loader, weights, device,output_dir,env_name,algo_name):
 
     

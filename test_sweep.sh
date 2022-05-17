@@ -4,16 +4,17 @@
 # do
 python -m domainbed.scripts.test_sweep launch\
     --data_dir=/share/data/drive_2/DG/data \
-    --output_dir=domainbed/outputs/PACS/DeitSmall \
-    --command_launcher multi_gpu_2_3\
-    --algorithms DeitSmall\
+    --output_dir=domainbed/outputs/DGT/gridsearch/Deit_simple_augmix_features/5/1 \
+    --command_launcher multi_gpu\
+    --algorithms Deit_simple_augmix\
     --single_test_envs \
     --test_robustness False\
-    --accuracy True\
+    --accuracy False\
+    --tsne True\
     --datasets PACS \
     --n_hparams 1  \
     --n_trials 3 \
-    --hparams """{\"batch_size\":32}"""
+    --hparams """{\"batch_size\":32,\"Wd\":5,\"temp\":1,\"attn_sep_mask\":1,\"mask_clsT_distT\":1}""" 
 
 # for Wd in 2.0 3.0 5.0 10
 #    do

@@ -111,7 +111,7 @@ if __name__ == '__main__':
     parser.add_argument("--threshold", type=float, default=0.75, help="""We visualize masks
         obtained by thresholding the self-attention maps to keep xx% of the mass.""")
     args = parser.parse_args()
-    args.image_path='/share/data/drive_2/DG/data/PACS/art_painting/horse/pic_002.jpg'
+    args.image_path='/share/data/drive_2/DG/data/PACS/art_painting/giraffe/pic_025.jpg'
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     # build model
     model = vits.__dict__['vit_small'](patch_size=16, num_classes=0)
