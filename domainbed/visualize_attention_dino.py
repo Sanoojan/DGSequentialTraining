@@ -20,6 +20,8 @@ import random
 import colorsys
 import requests
 from io import BytesIO
+import cv2 as cv
+import einops
 
 import skimage.io
 from skimage.measure import find_contours
@@ -29,8 +31,10 @@ import torch
 import torch.nn as nn
 import torchvision
 from torchvision import transforms as pth_transforms
+import torchvision.transforms.functional as TF
 import numpy as np
 from PIL import Image
+from skimage import exposure
 
 # import utils
 import domainbed.lib.Dino_vit as vits
@@ -53,12 +57,19 @@ def random_colors(N, bright=True):
     return colors
 
 
-def display_instances(image, mask, fname="test", figsize=(5, 5), blur=False, contour=True, alpha=0.5):
+def display_instances(image, mask,attention, fname="test", figsize=(5, 5), blur=False, contour=True, alpha=0.5):
     fig = plt.figure(figsize=figsize, frameon=False)
     ax = plt.Axes(fig, [0., 0., 1., 1.])
     ax.set_axis_off()
     fig.add_axes(ax)
     ax = plt.gca()
+   
+    attention=attention/np.amax(attention,keepdims=True)
+    hetmp=(255.0*np.array(attention).reshape(224,224,1)).astype(np.uint8)
+    hetmp = cv2.blur(hetmp,(10,10))
+    attn=cv.applyColorMap(hetmp,cv.COLORMAP_JET)
+    resu=cv.addWeighted(np.array(image),0.7,np.array(attn),0.6,0.4)
+    cv.imwrite(fname,resu)
 
     N = 1
     mask = mask[None, :, :]
@@ -93,6 +104,9 @@ def display_instances(image, mask, fname="test", figsize=(5, 5), blur=False, con
     ax.imshow(masked_image.astype(np.uint8), aspect='auto')
     fig.savefig(fname)
     print(f"{fname} saved.")
+
+
+
     return
 
 
@@ -187,6 +201,8 @@ if __name__ == '__main__':
     # we keep only the output patch attention
     
     attentions = attentions[0, :, 0, 1:].reshape(nh, -1)
+    attentions=torch.mean(attentions,dim=0,keepdim=True)
+    nh=1
  
     if args.threshold is not None:
         # we keep only a certain percentage of the mass
@@ -216,4 +232,4 @@ if __name__ == '__main__':
     if args.threshold is not None:
         image = skimage.io.imread(os.path.join(args.output_dir, "img.png"))
         for j in range(nh):
-            display_instances(image, th_attn[j], fname=os.path.join(args.output_dir, "mask_th" + str(args.threshold) + "_head" + str(j) +".png"), blur=False)
+            display_instances(image, th_attn[j],attentions[j], fname=os.path.join(args.output_dir, "mask_th" + str(args.threshold) + "_head" + str(j) +".png"), blur=True)

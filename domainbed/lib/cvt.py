@@ -5,6 +5,7 @@ import collections.abc
 import logging
 import os
 from collections import OrderedDict
+import itertools
 
 import numpy as np
 import scipy
@@ -94,6 +95,8 @@ class Attention(nn.Module):
                  padding_kv=1,
                  padding_q=1,
                  with_cls_token=True,
+                 with_di_token=False,
+                 attn_sep_mask=False,
                  **kwargs
                  ):
         super().__init__()
@@ -104,6 +107,7 @@ class Attention(nn.Module):
         # head_dim = self.qkv_dim // num_heads
         self.scale = dim_out ** -0.5
         self.with_cls_token = with_cls_token
+        self.with_di_token = with_di_token
 
         self.conv_proj_q = self._build_projection(
             dim_in, dim_out, kernel_size, padding_q,
@@ -117,7 +121,7 @@ class Attention(nn.Module):
             dim_in, dim_out, kernel_size, padding_kv,
             stride_kv, method
         )
-
+        self.attn_sep_mask=with_di_token # Fixed mask if Di token introduced
         self.proj_q = nn.Linear(dim_in, dim_out, bias=qkv_bias)
         self.proj_k = nn.Linear(dim_in, dim_out, bias=qkv_bias)
         self.proj_v = nn.Linear(dim_in, dim_out, bias=qkv_bias)
@@ -165,7 +169,10 @@ class Attention(nn.Module):
         return proj
 
     def forward_conv(self, x, h, w):
-        if self.with_cls_token:
+        
+        if (self.with_cls_token and self.with_di_token):
+            cls_token, x,di_token = torch.split(x, [1, h*w,1], 1) 
+        elif self.with_cls_token:
             cls_token, x = torch.split(x, [1, h*w], 1)
 
         x = rearrange(x, 'b (h w) c -> b c h w', h=h, w=w)
@@ -185,7 +192,11 @@ class Attention(nn.Module):
         else:
             v = rearrange(x, 'b c h w -> b (h w) c')
 
-        if self.with_cls_token:
+        if (self.with_cls_token and self.with_di_token):
+            q = torch.cat((cls_token, q,di_token), dim=1)
+            k = torch.cat((cls_token, k,di_token), dim=1)
+            v = torch.cat((cls_token, v,di_token), dim=1)
+        elif self.with_cls_token:
             q = torch.cat((cls_token, q), dim=1)
             k = torch.cat((cls_token, k), dim=1)
             v = torch.cat((cls_token, v), dim=1)
@@ -193,19 +204,29 @@ class Attention(nn.Module):
         return q, k, v
 
     def forward(self, x, h, w):
+        
         if (
             self.conv_proj_q is not None
             or self.conv_proj_k is not None
             or self.conv_proj_v is not None
         ):
             q, k, v = self.forward_conv(x, h, w)
-
+     
         q = rearrange(self.proj_q(q), 'b t (h d) -> b h t d', h=self.num_heads)
         k = rearrange(self.proj_k(k), 'b t (h d) -> b h t d', h=self.num_heads)
         v = rearrange(self.proj_v(v), 'b t (h d) -> b h t d', h=self.num_heads)
-
+        
         attn_score = torch.einsum('bhlk,bhtk->bhlt', [q, k]) * self.scale
+        if(self.attn_sep_mask):
+            B,N,C=x.shape
+            B,h,kN,kC=k.shape
+            permutations=[[0,kN-1],[N-1,0]]
+            # mask to avoid attention between token
+            for p in permutations:
+                attn_score[:,:,p[0],p[1]]-=float('inf')
+        
         attn = F.softmax(attn_score, dim=-1)
+        # print(attn.shape)
         attn = self.attn_drop(attn)
 
         x = torch.einsum('bhlt,bhtv->bhlv', [attn, v])
@@ -308,6 +329,7 @@ class Block(nn.Module):
         super().__init__()
 
         self.with_cls_token = kwargs['with_cls_token']
+        self.with_di_token = kwargs['with_di_token']
 
         self.norm1 = norm_layer(dim_in)
         self.attn = Attention(
@@ -389,6 +411,7 @@ class VisionTransformer(nn.Module):
                  drop_rate=0.,
                  attn_drop_rate=0.,
                  drop_path_rate=0.,
+                 dtokens=1,
                  act_layer=nn.GELU,
                  norm_layer=nn.LayerNorm,
                  init='trunc_norm',
@@ -409,13 +432,19 @@ class VisionTransformer(nn.Module):
         )
 
         with_cls_token = kwargs['with_cls_token']
+        with_di_token= kwargs['with_di_token']
         if with_cls_token:
             self.cls_token = nn.Parameter(
                 torch.zeros(1, 1, embed_dim)
             )
         else:
             self.cls_token = None
-
+        if with_di_token:
+            self.di_token = nn.Parameter(
+                torch.zeros(1, 1, embed_dim)
+            )
+        else:
+            self.di_token=None
         self.pos_drop = nn.Dropout(p=drop_rate)
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
 
@@ -440,6 +469,8 @@ class VisionTransformer(nn.Module):
 
         if self.cls_token is not None:
             trunc_normal_(self.cls_token, std=.02)
+        if self.di_token is not None:
+            trunc_normal_(self.di_token, std=.02)
 
         if init == 'xavier':
             self.apply(self._init_weights_xavier)
@@ -475,7 +506,12 @@ class VisionTransformer(nn.Module):
         x = rearrange(x, 'b c h w -> b (h w) c')
 
         cls_tokens = None
-        if self.cls_token is not None:
+        if(self.di_token is not None and self.cls_token is not None):
+            cls_tokens = self.cls_token.expand(B, -1, -1)
+            di_tokens=self.di_token.expand(B,-1,-1)
+            x = torch.cat((cls_tokens, x,di_tokens), dim=1)
+
+        elif self.cls_token is not None:
             # stole cls_tokens impl from Phil Wang, thanks
             cls_tokens = self.cls_token.expand(B, -1, -1)
             x = torch.cat((cls_tokens, x), dim=1)
@@ -485,25 +521,35 @@ class VisionTransformer(nn.Module):
 
         patches = []
         class_tokens = []
+        dinv_tokens=[]
         for i, blk in enumerate(self.blocks):
             x = blk(x, H, W)
-            if self.cls_token is not None:
+            if (self.di_token is not None and self.cls_token is not None ):
+                cls_tokens_, x_,di_tokens_ = torch.split(x, [1, H * W, 1], 1)
+                x_ = rearrange(x_, 'b (h w) c -> b c h w', h=H, w=W)
+                patches.append(x_)
+                class_tokens.append(cls_tokens_) 
+                dinv_tokens.append(di_tokens_) 
+            elif self.cls_token is not None:
                 cls_tokens_, x_ = torch.split(x, [1, H * W], 1)
                 x_ = rearrange(x_, 'b (h w) c -> b c h w', h=H, w=W)
                 patches.append(x_)
                 class_tokens.append(cls_tokens_)
-
-        if self.cls_token is not None:
+        if self.di_token is not None and self.cls_token is not None:
+            cls_tokens, x,di_tokens = torch.split(x, [1, H*W,1], 1)
+        elif self.cls_token is not None:
             cls_tokens, x = torch.split(x, [1, H*W], 1)
+        
         x = rearrange(x, 'b (h w) c -> b c h w', h=H, w=W)
 
-        return x, cls_tokens, patches, class_tokens
+        return x, cls_tokens, patches, class_tokens,dinv_tokens
 
 
 class ConvolutionalVisionTransformer(nn.Module):
     def __init__(self,
                  in_chans=3,
                  num_classes=1000,
+                 dtokens=1,
                  act_layer=nn.GELU,
                  norm_layer=nn.LayerNorm,
                  init='trunc_norm',
@@ -526,6 +572,7 @@ class ConvolutionalVisionTransformer(nn.Module):
                 'attn_drop_rate': spec['ATTN_DROP_RATE'][i],
                 'drop_path_rate': spec['DROP_PATH_RATE'][i],
                 'with_cls_token': spec['CLS_TOKEN'][i],
+                'with_di_token':spec['DI_TOKEN'][i],
                 'method': spec['QKV_PROJ_METHOD'][i],
                 'kernel_size': spec['KERNEL_QKV'][i],
                 'padding_q': spec['PADDING_Q'][i],
@@ -536,6 +583,7 @@ class ConvolutionalVisionTransformer(nn.Module):
 
             stage = VisionTransformer(
                 in_chans=in_chans,
+                dtokens=dtokens,
                 init=init,
                 act_layer=act_layer,
                 norm_layer=norm_layer,
@@ -548,7 +596,7 @@ class ConvolutionalVisionTransformer(nn.Module):
         dim_embed = spec['DIM_EMBED'][-1]
         self.norm = norm_layer(dim_embed)
         self.cls_token = spec['CLS_TOKEN'][-1]
-
+        self.di_token = spec['DI_TOKEN'][-1]
         # Classifier head
         self.head = nn.Linear(dim_embed, num_classes) if num_classes > 0 else nn.Identity()
         trunc_normal_(self.head.weight, std=0.02)
@@ -611,34 +659,44 @@ class ConvolutionalVisionTransformer(nn.Module):
         for i in range(self.num_stages):
             layers.add(f'stage{i}.pos_embed')
             layers.add(f'stage{i}.cls_token')
-
+            layers.add(f'stage{i}.di_token')
         return layers
 
     def forward_features(self, x):
-
         for i in range(self.num_stages):
-            x, cls_tokens, patches, class_tokens = getattr(self, f'stage{i}')(x) # first two stages produce 0 class tokens
+            x, cls_tokens, patches, class_tokens,dinv_tokens = getattr(self, f'stage{i}')(x) # first two stages produce 0 class tokens
 
 
         outputs = []
+        outputs_di=[]
+        if self.di_token :
+            for di_token in dinv_tokens:
+                outputs_di.append(torch.squeeze(self.norm(di_token)))
         if self.cls_token:
             for cls_token in class_tokens:
                 outputs.append(torch.squeeze(self.norm(cls_token)))
+
         else:
             x = rearrange(x, 'b c h w -> b (h w) c')
             x = self.norm(x)
             x = torch.mean(x, dim=1)
-
+        if self.di_token :
+            return outputs,outputs_di
         return outputs
 
     def forward(self, x):
-        outputs = self.forward_features(x)
+        if self.di_token :
+            outputs,outputs_di=self.forward_features(x)
+        else:
+            outputs = self.forward_features(x)
         x = [self.head(out) for out in outputs]
-
+        # print(x.shape(name=None))
+        if self.di_token :
+            return x[-1],outputs_di[-1]
         return x
 
 @register_model
-def small_cvt(pretrained=False, index=0, **kwargs):
+def small_cvt(pretrained=False,add_di_tok=False, index=0, **kwargs):
 
     msvit_spec = {
     "INIT": 'trunc_norm',
@@ -655,6 +713,7 @@ def small_cvt(pretrained=False, index=0, **kwargs):
     "DROP_PATH_RATE": [0.0, 0.0, 0.1],
     "QKV_BIAS": [True, True, True],
     "CLS_TOKEN": [False, False, True],
+    "DI_TOKEN":[False, False, add_di_tok],
     "POS_EMBED": [False, False, False],
     "QKV_PROJ_METHOD": ['dw_bn', 'dw_bn', 'dw_bn'],
     "KERNEL_QKV": [3, 3, 3],
@@ -679,7 +738,7 @@ def small_cvt(pretrained=False, index=0, **kwargs):
 
 
 @register_model
-def tiny_cvt(pretrained=False, index=0, **kwargs):
+def tiny_cvt(pretrained=False,add_di_tok=False, index=0, **kwargs):
     msvit_spec = {
     "INIT": 'trunc_norm',
     "NUM_STAGES": 3,
@@ -695,6 +754,7 @@ def tiny_cvt(pretrained=False, index=0, **kwargs):
     "DROP_PATH_RATE": [0.0, 0.0, 0.1],
     "QKV_BIAS": [True, True, True],
     "CLS_TOKEN": [False, False, True],
+    "DI_TOKEN":[False, False, add_di_tok],
     "POS_EMBED": [False, False, False],
     "QKV_PROJ_METHOD": ['dw_bn', 'dw_bn', 'dw_bn'],
     "KERNEL_QKV": [3, 3, 3],

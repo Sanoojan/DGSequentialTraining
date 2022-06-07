@@ -4,9 +4,9 @@
 # do
 python -m domainbed.scripts.test_sweep launch\
     --data_dir=/share/data/drive_2/DG/data \
-    --output_dir=domainbed/outputs/DGT/gridsearch/Deit_simple_augmix_features/5/1 \
+    --output_dir=./domainbed/outputs/DI_tokening/Deit_seperate_DL_4_wei_lr/0.3 \
     --command_launcher multi_gpu\
-    --algorithms Deit_simple_augmix\
+    --algorithms DI_tokening\
     --single_test_envs \
     --test_robustness False\
     --accuracy False\
@@ -14,7 +14,7 @@ python -m domainbed.scripts.test_sweep launch\
     --datasets PACS \
     --n_hparams 1  \
     --n_trials 3 \
-    --hparams """{\"batch_size\":32,\"Wd\":5,\"temp\":1,\"attn_sep_mask\":1,\"mask_clsT_distT\":1}""" 
+    --hparams """{\"Wd\":0.3,\"attn_sep_mask\":1,\"num_class_select\":4,\"weight_decay\":0.01,\"lr\":0.00002}""" 
 
 # for Wd in 2.0 3.0 5.0 10
 #    do

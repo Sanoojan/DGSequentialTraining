@@ -21,7 +21,7 @@ from domainbed import datasets
 from domainbed import hparams_registry
 from domainbed import algorithms
 from domainbed.lib import misc
-from domainbed.lib.fast_data_loader import InfiniteDataLoader, FastDataLoader
+from domainbed.lib.fast_data_loader import InfiniteDataLoader, FastDataLoader, InfiniteSubDataLoader
 
 from domainbed import queue_var # for making queue: CorrespondenceSelfCross
 
@@ -155,6 +155,14 @@ if __name__ == "__main__":
         num_workers=dataset.N_WORKERS)
         for i, (env, env_weights) in enumerate(in_splits)
         if i not in args.test_envs]
+    
+    # train_sub_loaders = [InfiniteSubDataLoader(
+    #     dataset=env,
+    #     weights=env_weights,
+    #     batch_size=hparams['batch_size'],
+    #     num_workers=dataset.N_WORKERS)
+    #     for i, (env, env_weights) in enumerate(in_splits)
+    #     if i not in args.test_envs]
 
     uda_loaders = [InfiniteDataLoader(
         dataset=env,
@@ -223,7 +231,7 @@ if __name__ == "__main__":
         torch.save(save_dict, os.path.join(args.output_dir, filename))
 
     ################################ Code required for Loading Data Classwise ################################
-    if args.algorithm in ('CrossImageVIT','DeitSmall_StrongTeachers','DeitSmall_StrongTeachers_nodist','Deit_DomInv','Deit_simple_augmix','Deit_augmix_seperate') : # Queue computations 
+    if args.algorithm in ('CrossImageVIT','DeitSmall_StrongTeachers','DeitSmall_StrongTeachers_nodist','Deit_DomInv','Deit_simple_augmix','Deit_augmix_seperate','CVT_augmix_seperate','DeitBase_augmix_seperate','T2T_augmix_seperate','CNN_transformer_DI','Deit_augmix_seperate_DL') : # Queue computations 
         print('Firstly, computing Queues for the algorithm: ',args.algorithm,",pls wait....")
         queue_sz = hparams['batch_size'] # the memory module/ queue size
         minibatches_device = [(x.to(device), y.to(device))

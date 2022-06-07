@@ -11,7 +11,7 @@ import sys
 import time
 import uuid
 from collections import Counter
-
+from math import ceil
 import numpy as np
 import PIL
 import torch
@@ -28,9 +28,7 @@ from domainbed import algorithms
 from domainbed.lib import misc
 from domainbed.lib.fast_data_loader import InfiniteDataLoader, FastDataLoader
 
-################################ Code required for RCERM ################################ 
-from domainbed import queue_var
-################################ Code required for RCERM ################################ 
+
 def load_model(fname):
     
     dump = torch.load(fname)
@@ -41,8 +39,38 @@ def load_model(fname):
         dump["model_num_domains"],
         dump["model_hparams"])
     
-    algorithm.load_state_dict(dump["model_dict"])
+    algorithm.load_state_dict(dump["model_dict"],strict=False)
     return algorithm
+
+def plot_features(features, labels, num_classes,filename):
+    """Plot features on 2D plane.
+    Args:
+        features: (num_instances, num_features).
+        labels: (num_instances).
+    """
+    colors = ['C0', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6']
+    class_names=['Dog','Elephant','Giraffe','Guitar','Horse','House','Person']
+    if num_classes<4:
+        colors=[ 'C7', 'C8', 'C9','C10']
+        class_names=['Art','Cartoon','Photo','Sketch']
+    for label_idx in range(num_classes):
+        plt.scatter(
+            features[labels==label_idx, 0],
+            features[labels==label_idx, 1],
+            c=colors[label_idx],
+            s=4,
+        )
+        plt.xticks([])
+        plt.yticks([])
+
+    plt.legend(class_names, loc='upper right', bbox_to_anchor=(1.2,1), labelspacing=1.2)
+    #dirname = osp.join(args.save_dir, prefix)
+    # if not osp.exists(dirname):
+    #     os.mkdir(dirname)
+    # save_name = osp.join(dirname, 'epoch_' + str(epoch+1) + '.png')
+    plt.savefig(filename, bbox_inches='tight')
+
+    plt.close()
 
 def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
               filename: str,domain_labels=['Art','Cartoon','Photo','Sketch']):
@@ -72,7 +100,8 @@ def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
     plt.xticks([])
     plt.yticks([])
     plt.tight_layout()
-    plt.savefig("TsneNew2/clswise"+filename)
+    plt.savefig("train_all/clswise"+filename)
+    plot_features(X_tsne, labelscls, 7,"train_all/01clswise"+filename)
 
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.spines['top'].set_visible(False)
@@ -94,8 +123,9 @@ def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
     plt.xticks([])
     plt.yticks([])
     plt.tight_layout()
-    plt.savefig("TsneNew2/domainwise"+filename)
-
+    plt.savefig("train_all/domainwise"+filename)
+    plot_features(X_tsne, labelsd, 3,"train_all/01domainwise"+filename)
+    # plot_features(X_tsne, labels, num_classes,filename)
 
     # fig, ax = plt.subplots(figsize=(10, 10))
     # ax.spines['top'].set_visible(False)
@@ -209,44 +239,72 @@ if __name__ == "__main__":
 
 
     in_splits = []
+    in_split_eval=[]
     out_splits = []
     uda_splits = []
-    for env_i, env in enumerate(dataset): #env is a domain
-        uda = []
+    class_weights=[]
+    num_classes=dataset.num_classes
 
-        out, in_ = misc.split_dataset(env,
-            int(len(env)*args.holdout_fraction),
-            misc.seed_hash(args.trial_seed, env_i))
+    
+    for env_i, env in enumerate(dataset):
+        in_splits_sub=[]
+        out_splits_sub=[]
+        uda_sub_split=[]
+        in_split_eval_sub=[]
+        for clsnum in range(num_classes):
+            uda = []
 
-        if env_i in args.test_envs:
-            uda, in_ = misc.split_dataset(in_,
-                int(len(in_)*args.uda_holdout_fraction),
+            out, in_ = misc.split_dataset(env[clsnum],
+                int(len(env[clsnum])*args.holdout_fraction),
                 misc.seed_hash(args.trial_seed, env_i))
 
-        if hparams['class_balanced']:
-            in_weights = misc.make_weights_for_balanced_classes(in_)
-            out_weights = misc.make_weights_for_balanced_classes(out)
-            if uda is not None:
-                uda_weights = misc.make_weights_for_balanced_classes(uda)
-        else:
-            in_weights, out_weights, uda_weights = None, None, None
-        print()
-        in_splits.append((in_, in_weights))
-        out_splits.append((out, out_weights))
-        if len(uda):
-            uda_splits.append((uda, uda_weights))
+            if env_i in args.test_envs:
+                uda, in_ = misc.split_dataset(in_,
+                    int(len(in_)*args.uda_holdout_fraction),
+                    misc.seed_hash(args.trial_seed, env_i))
 
+            if hparams['class_balanced']:
+                in_weights = misc.make_weights_for_balanced_classes(in_)
+                out_weights = misc.make_weights_for_balanced_classes(out)
+                if uda is not None:
+                    uda_weights = misc.make_weights_for_balanced_classes(uda)
+            else:
+                in_weights, out_weights, uda_weights = None, None, None
+            in_splits_sub.append((in_, in_weights))
+            in_split_eval_sub.append(in_)
+            out_splits_sub.append((out))
+            if len(uda):
+                uda_splits.append((uda, uda_weights))
+        in_splits.append(in_splits_sub)
+        out_splits.append(torch.utils.data.ConcatDataset(out_splits_sub))
+        in_split_eval.append(torch.utils.data.ConcatDataset(in_split_eval_sub))
+
+        # uda_splits.append(torch.utils.data.ConcatDataset(uda_sub_split))
+   
+    # print(len(in_splits[0]))
     if args.task == "domain_adaptation" and len(uda_splits) == 0:
         raise ValueError("Not enough unlabeled samples for domain adaptation.")
 
-    train_loaders = [InfiniteDataLoader(
-        dataset=env,
-        weights=env_weights,
-        batch_size=hparams['batch_size'],
-        num_workers=dataset.N_WORKERS)
-        for i, (env, env_weights) in enumerate(in_splits)
-        if i not in args.test_envs]
+    # train_loaders =[[InfiniteDataLoader(
+    #     dataset=cls,
+    #     weights=cls_weights,
+    #     batch_size=hparams['batch_size'],
+    #     num_workers=dataset.N_WORKERS)
+    #     for (cls, cls_weights) in in_splits_env] for i, in_splits_env in enumerate(in_splits) if i not in args.test_envs ]
 
+    class_wise_batchSize=ceil(hparams['batch_size']/hparams['num_class_select']*1.0)
+    num_class_select=hparams['num_class_select']
+    in_splits=list(zip(*in_splits))
+    # print(in_splits[0])
+    # print(len(in_splits))
+
+    eval_loaders = [FastDataLoader(
+        dataset=env,
+        batch_size=64,
+        num_workers=dataset.N_WORKERS)
+        for env in ( in_split_eval+out_splits+uda_splits )]
+
+ 
     uda_loaders = [InfiniteDataLoader(
         dataset=env,
         weights=env_weights,
@@ -255,14 +313,11 @@ if __name__ == "__main__":
         for i, (env, env_weights) in enumerate(uda_splits)
         if i in args.test_envs]
 
-    eval_loaders = [FastDataLoader(
-        dataset=env,
-        batch_size=64,
-        num_workers=dataset.N_WORKERS)
-        for env, _ in (in_splits + out_splits + uda_splits)]
-    eval_weights = [None for _, weights in (in_splits + out_splits + uda_splits)]
+    
+    # eval_weights = [None for _, weights in (in_splits + out_splits + uda_splits)]
+    eval_weights = [None for _  in ( in_split_eval +out_splits+ uda_splits)]
     eval_loader_names = ['env{}_in'.format(i)
-        for i in range(len(in_splits))]
+        for i in range(len(in_split_eval))]
     eval_loader_names += ['env{}_out'.format(i)
         for i in range(len(out_splits))]
     eval_loader_names += ['env{}_uda'.format(i)
@@ -288,11 +343,11 @@ if __name__ == "__main__":
 
     algorithm.to(device)
    
-    train_minibatches_iterator = zip(*train_loaders)
+    # train_minibatches_iterator = [zip(*trainLoad) for trainLoad in train_loaders]
     uda_minibatches_iterator = zip(*uda_loaders)
     checkpoint_vals = collections.defaultdict(lambda: [])
 
-    steps_per_epoch = min([len(env)/hparams['batch_size'] for env,_ in in_splits])
+    # steps_per_epoch = min([len(env)/hparams['batch_size'] for env,_ in in_splits])
 
     
     # checkpoint_freq = args.checkpoint_freq or dataset.CHECKPOINT_FREQ
@@ -303,8 +358,6 @@ if __name__ == "__main__":
     last_results_keys = None
     # for step in range(start_step, n_steps):
     step_start_time = time.time()
-    minibatches_device = [(x.to(device), y.to(device))
-        for x,y in next(train_minibatches_iterator)]
     if args.task == "domain_adaptation":
         uda_device = [x.to(device)
             for x,_ in next(uda_minibatches_iterator)]
@@ -328,7 +381,7 @@ if __name__ == "__main__":
     evals = zip(eval_loader_names, eval_loaders, eval_weights)
     algo_name=args.algo_name
 
-    name_conv=algo_name+str(args.test_envs)+"_tr"+str(args.trial_seed)+"train_clstokW5"
+    name_conv=algo_name+str(args.test_envs)+"_tr"+str(args.trial_seed)+"DI token"
     if(args.tsne):
         if(os.path.exists("tsne/TSVS/meta_"+name_conv+".tsv")):
             os.remove("tsne/TSVS/meta_"+name_conv+".tsv")
@@ -342,12 +395,12 @@ if __name__ == "__main__":
             # print(algo_name,":",name,":",acc)
             results[name+'_acc'] = acc
         elif(args.tsne):
-            if(int(name[3]) in args.test_envs  ):
-                continue
-            if(int(name[3]) not in args.test_envs  and  "in" in name ):
-                continue
-            # if(int(name[3]) in args.test_envs and  "in" in name):
+            # if(int(name[3]) not in args.test_envs and "in" in name  ):
             #     continue
+            # if(int(name[3]) in args.test_envs  and  "out" in name ):
+            #     continue
+            if(int(name[3]) in args.test_envs ):
+                continue
             print(name)
             Features,labels=misc.TsneFeatures(algorithm, loader, weights, device,args.output_dir,env_name,algo_name)
             
@@ -368,6 +421,75 @@ if __name__ == "__main__":
                     tokenlabels.append("DS") if i<len(labels)/2 else tokenlabels.append("DI")
                     record_file.write(str(labels[i]))
                     record_file.write("\n")
+        elif(args.get_loss  and  "in" in name):
+            # Computing Flatness (comment gaussian noise with std for random normal scaling)
+            loss_degr=[]
+            x=list(np.arange(0.0,0.055,0.005))
+            loss,acc=misc.loss_ret(algorithm, loader, weights, device)
+            loss_degr.append(loss.item())
+            accuracies=[]
+            accuracies.append(acc)
+            for rad in x:
+                if rad==0:
+                    continue
+                total_loss=0
+                tot_accuracy=0
+                for j in range(10):
+
+                    algo_cpy=copy.deepcopy(algorithm)
+                    net=algo_cpy.network
+                    Ws=copy.deepcopy(net.state_dict())
+                    num_trainable_params = sum(p.numel() for p in net.parameters() if p.requires_grad)
+                    # print(num_trainable_params)
+                    direction_vector = torch.randn(num_trainable_params)
+                    unit_direction_vector = direction_vector / torch.norm(direction_vector)
+                    unit_direction_vector*=rad
+
+                    unit_direction_vector=torch.normal(0.0, float(rad), size=(sum(p.numel() for p in net.parameters() if p.requires_grad),))  #gaussian noise with std
+                    i=0
+                    for k,w in Ws.items():
+
+                        w=w.to("cuda")
+                        change=unit_direction_vector[i:i+w.numel()].reshape(w.shape).to("cuda")
+                        w+=change
+                        i=i+w.numel()
+                    # print(Ws['head.weight'])
+                    net.load_state_dict(Ws)
+                    
+                    loss_ch,acc=misc.loss_ret(algo_cpy, loader, weights, device)
+                    loss_diff=loss_ch-loss
+                    total_loss+=loss_ch
+                    tot_accuracy+=acc
+                total_loss/=10.0
+                tot_accuracy/=10.0
+                print(rad)
+                print(total_loss)
+                print(tot_accuracy)
+                loss_degr.append(total_loss.item())
+                accuracies.append(tot_accuracy)
+                
+            # plt.plot(x,loss_degr,linewidth=1.5,marker='x')
+            # plt.xlabel('Gamma')
+            # plt.ylabel('Flatness')
+            # xticks = [10,20,30,40,50,60]
+            # ticklabels = ['10','20','30','40','50','60']
+            # xticks = [10,20]
+            # ticklabels = ['10','20']
+            # plt.xticks(xticks, ticklabels)
+            # plt.savefig( 'Flatness/'+algo_name+"test_env"+str(args.test_envs)+'.png')
+            print(algo_name,"_test_env_",str(args.test_envs))
+            print(loss_degr)
+            with open("flatness2.txt", "a") as record_file:    
+                record_file.write("\n")   
+                record_file.write("#"+algo_name+"test_env"+str(args.test_envs)+"train_env"+str(int(name[3])))
+                record_file.write("\t")
+                record_file.write("\n")
+                record_file.write("l=")
+                record_file.write(str(loss_degr))
+                record_file.write("\n")
+                record_file.write("ac=")
+                record_file.write(str(accuracies))
+                record_file.write("\n")
         elif (int(name[3]) in args.test_envs and  "in" in name):
             print("name",name)
             env_name=name[:4]

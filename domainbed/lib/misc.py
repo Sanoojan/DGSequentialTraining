@@ -240,11 +240,11 @@ def TsneFeatures(network, loader, weights, device, output_dir, env_name, algo_na
             y = y.to(device)
 
             # p,x_dist,cls_feat,dist_feat = Transnetwork(x,return_cls_dist_feat=True) #MDT
-            p,cls_feat = Transnetwork(x,return_cls_feat=True) # vit
+            p,di_feat,cls_feat = Transnetwork(x,return_cls_feat=True) # vit
             
 
             # Features.append(dist_feat[:,0])
-            Features.append(cls_feat)
+            Features.append(di_feat)
             # Features2.append(DI)
             labels.append(y)
             if weights is None:
