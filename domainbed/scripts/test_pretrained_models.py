@@ -50,10 +50,11 @@ def plot_features(features, labels, num_classes,filename):
     """
     colors = ['C0', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6']
     class_names=['Dog','Elephant','Giraffe','Guitar','Horse','House','Person']
-    if num_classes<4:
+    if num_classes<=4:
         colors=[ 'C7', 'C8', 'C9','C10']
         class_names=['Art','Cartoon','Photo','Sketch']
-    for label_idx in range(num_classes):
+    unique_classes=np.unique(np.array(labels))
+    for label_idx in unique_classes:
         plt.scatter(
             features[labels==label_idx, 0],
             features[labels==label_idx, 1],
@@ -91,17 +92,17 @@ def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
     ax.spines['left'].set_visible(False)
  
     labelscls=labels%10
-    palette = sn.color_palette("bright",(np.unique(labelscls)).size)
-    sn.scatterplot(X_tsne[:, 0], X_tsne[:, 1], hue=labelscls, legend='full', palette=palette)
-    plt.setp(ax.get_legend().get_texts(), fontsize='22') # for legend text
-    plt.setp(ax.get_legend().get_title(), fontsize='32') # for legend title
-    # sn.FacetGrid(tsne_df,hue="label",height=10).map(plt.scatter,'Dim_1','Dim_2')
-    # plt.scatter(X_tsne[:, 0], X_tsne[:, 1], c=labels, s=20)
-    plt.xticks([])
-    plt.yticks([])
-    plt.tight_layout()
-    plt.savefig("train_all/clswise"+filename)
-    plot_features(X_tsne, labelscls, 7,"train_all/01clswise"+filename)
+    # palette = sn.color_palette("bright",(np.unique(labelscls)).size)
+    # sn.scatterplot(X_tsne[:, 0], X_tsne[:, 1], hue=labelscls, legend='full', palette=palette)
+    # plt.setp(ax.get_legend().get_texts(), fontsize='22') # for legend text
+    # plt.setp(ax.get_legend().get_title(), fontsize='32') # for legend title
+    # # sn.FacetGrid(tsne_df,hue="label",height=10).map(plt.scatter,'Dim_1','Dim_2')
+    # # plt.scatter(X_tsne[:, 0], X_tsne[:, 1], c=labels, s=20)
+    # plt.xticks([])
+    # plt.yticks([])
+    # plt.tight_layout()
+    # plt.savefig("train_all/clswise"+filename)
+    plot_features(X_tsne, labelscls, 7,"tsnedit_train_n_testF/01clswise"+filename)
 
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.spines['top'].set_visible(False)
@@ -115,16 +116,16 @@ def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
     for lab in (labelsd):
         named_labels.append(domain_labels[int(lab)])
 
-    palette = sn.color_palette("bright", (np.unique(labelsd)).size)
-    sn.scatterplot(X_tsne[:, 0], X_tsne[:, 1], hue=named_labels, legend='full', palette=palette)
+    # palette = sn.color_palette("bright", (np.unique(labelsd)).size)
+    # sn.scatterplot(X_tsne[:, 0], X_tsne[:, 1], hue=named_labels, legend='full', palette=palette)
 
-    plt.setp(ax.get_legend().get_texts(), fontsize='22') # for legend text
-    plt.setp(ax.get_legend().get_title(), fontsize='32') # for legend title
-    plt.xticks([])
-    plt.yticks([])
-    plt.tight_layout()
-    plt.savefig("train_all/domainwise"+filename)
-    plot_features(X_tsne, labelsd, 3,"train_all/01domainwise"+filename)
+    # plt.setp(ax.get_legend().get_texts(), fontsize='22') # for legend text
+    # plt.setp(ax.get_legend().get_title(), fontsize='32') # for legend title
+    # plt.xticks([])
+    # plt.yticks([])
+    # plt.tight_layout()
+    # plt.savefig("train_all/domainwise"+filename)
+    plot_features(X_tsne, labelsd, 3,"tsnedit_train_n_testF/01domainwise"+filename)
     # plot_features(X_tsne, labels, num_classes,filename)
 
     # fig, ax = plt.subplots(figsize=(10, 10))
@@ -381,7 +382,7 @@ if __name__ == "__main__":
     evals = zip(eval_loader_names, eval_loaders, eval_weights)
     algo_name=args.algo_name
 
-    name_conv=algo_name+str(args.test_envs)+"_tr"+str(args.trial_seed)+"DI token"
+    name_conv=algo_name+str(args.test_envs)+"_tr"+str(args.trial_seed)+"cls token"
     if(args.tsne):
         if(os.path.exists("tsne/TSVS/meta_"+name_conv+".tsv")):
             os.remove("tsne/TSVS/meta_"+name_conv+".tsv")
@@ -395,12 +396,12 @@ if __name__ == "__main__":
             # print(algo_name,":",name,":",acc)
             results[name+'_acc'] = acc
         elif(args.tsne):
-            # if(int(name[3]) not in args.test_envs and "in" in name  ):
-            #     continue
-            # if(int(name[3]) in args.test_envs  and  "out" in name ):
-            #     continue
-            if(int(name[3]) in args.test_envs ):
+            if(int(name[3]) not in args.test_envs and "in" in name  ):
                 continue
+            if(int(name[3]) in args.test_envs  and  "out" in name ):
+                continue
+            # if(int(name[3]) in args.test_envs ):
+            #     continue
             print(name)
             Features,labels=misc.TsneFeatures(algorithm, loader, weights, device,args.output_dir,env_name,algo_name)
             
