@@ -17,7 +17,6 @@ import PIL
 import torch
 import torchvision
 import torch.utils.data
-# os.chdir("/home/computervision1/Sanoojan/DomainBedS/")
 print(sys.path)
 from domainbed import datasets
 from domainbed import hparams_registry
@@ -226,7 +225,7 @@ if __name__ == "__main__":
         for i in range(len(uda_splits))]
 
     algorithm_class = algorithms.get_algorithm_class(args.algorithm)
-    if args.algorithm in ('DI_tokening'):
+    if args.algorithm in ('DI_tokening','ERM_ViT','DI_tokening_vit'):
         algorithm = algorithm_class(dataset.input_shape, dataset.num_classes,
             len(dataset) - len(args.test_envs), hparams,args.backbone)
     else:

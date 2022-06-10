@@ -37,8 +37,9 @@ def _hparams(algorithm, dataset, random_seed):
 
     # Algorithm-specific hparam definitions. Each block of code below
     # corresponds to exactly one algorithm.
-    if algorithm in ['DeitSmall', 'DeitTiny']:
-        _hparam('eps', 1e-8, lambda r: 10**r.uniform(-2, 2))
+    if algorithm in ['DeitSmall', 'DeitTiny','ERM_ViT']:
+        _hparam('num_class_select', 4, lambda r: int(r.choice([7,3,10,15]))) # should be less than the total num of classes in the dataset
+        _hparam('attn_sep_mask', False, lambda r: False)
     if algorithm in ['MultiDomainDistillation','DeitSmall_StrongTeachers','DeitSmall_StrongTeachers_nodist','Deit_DomInv','MultiDomainDistillation_Dtokens','MultiDomainDistillation_Dtokens_wtClsDist','MultiDomainDistillation_Dtokens_CE','Deit_dist','MultiDomainDistillation_Dtokens_patchmask','MDT_self_dist_wCE','Deit_simple_augmix','CVT_augmix_seperate','T2T_augmix_seperate']:
         _hparam('temp', 3.0, lambda r: r.uniform(1.0, 7.0))
         _hparam('Wd', 1.0, lambda r: r.choice([0., 0.1, 0.05, 0.8,2.0]))
@@ -46,7 +47,7 @@ def _hparams(algorithm, dataset, random_seed):
         _hparam('mask_dist_other_patches', False, lambda r: False)
         _hparam('mask_clsT_distT', True, lambda r: True) # works only if attn_sep_mask
 
-    if algorithm in ['CVT_augmix_seperate','DeitBase_augmix_seperate','T2T_augmix_seperate','CNN_transformer_DI','Deit_augmix_seperate','Deit_DI_tokening','Deit_DI_tokening_momentum','Deit_augmix_seperate_DL','Deit_augmix_seperate_DL_aver','DI_tokening_aver','DI_tokening']:
+    if algorithm in ['CVT_augmix_seperate','DeitBase_augmix_seperate','T2T_augmix_seperate','CNN_transformer_DI','Deit_augmix_seperate','Deit_DI_tokening','Deit_DI_tokening_momentum','Deit_augmix_seperate_DL','Deit_augmix_seperate_DL_aver','DI_tokening_aver','DI_tokening','DI_tokening_vit']:
         _hparam('Wd', 1.0, lambda r: r.choice([25.0,15.0,5.0,1.0,0.8,0.5,0.3]))
         _hparam('num_class_select', 4, lambda r: int(r.choice([7,3,10,15]))) # should be less than the total num of classes in the dataset
         _hparam('attn_sep_mask', True, lambda r: True)

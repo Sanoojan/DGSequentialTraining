@@ -878,6 +878,128 @@ class DI_tokening(Algorithm):
         out,out_dist= self.network(x)
         return out
 
+
+class ERM_ViT(Algorithm):
+    """
+    Deit_dist; Order of domains in training should be preserved
+    """
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams,backbone="DeitSmall"):
+        super(ERM_ViT,self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+       
+        self.num_domains=num_domains
+        self.network=return_backbone_network(backbone,num_classes,self.hparams,add_di_token=False)
+        self.optimizer = torch.optim.AdamW(
+            self.network.parameters(),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.cnt=0
+        self.num_class_select=self.hparams['num_class_select']
+
+
+    def update(self, minibatches, unlabeled=None):
+
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        n=self.num_class_select
+        d=self.num_domains
+        all_y=einops.rearrange(all_y,'(n d s)->(d s n)',n=n ,d=d)
+        all_x=einops.rearrange(all_x,'(n d s) C H W->(d s n) C H W ',n=n ,d=d)
+
+        
+        batch_images = make_grid(all_x, nrow=7, normalize=True)
+        if(self.cnt==0):
+            save_image(batch_images, "./domainbed/batchimg.png",normalize=False)
+        loss=0
+        pred=self.predictTrain(all_x)
+        loss+= F.cross_entropy(pred,all_y)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+       
+    def predictTrain(self, x):
+        return self.network(x)
+
+    def predict(self, x):
+        out= self.network(x)
+        return out
+
+class DI_tokening_vit(Algorithm):
+    """
+    Deit_dist; Order of domains in training should be preserved
+    """
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams,backbone="DeitSmall"):
+        super(DI_tokening_vit,self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+       
+        self.num_domains=num_domains
+        # network_deit=deit_small_patch16_224(pretrained=True) 
+        # network_deit.head = nn.Linear(384, num_classes)
+    
+        # attn_sep_mask=self.hparams["attn_sep_mask"]
+        # # self.network=MDVisionTransformer(img_size=224,num_classes=num_classes, distilled=True,patch_size=16, embed_dim=384, depth=12, num_heads=6,num_dist_token=1,attn_sep_mask=attn_sep_mask)
+        # self.network=dit(img_size=224,num_classes=num_classes, distilled=False,patch_size=16, embed_dim=384, depth=12, num_heads=6,in_chans=3,add_di_token=True,attn_sep_mask=attn_sep_mask)
+        # self.network.load_state_dict(network_deit.state_dict(),strict=False) 
+        # printNetworkParams(self.network)
+        self.network=return_backbone_network(backbone,num_classes,self.hparams)
+        self.optimizer = torch.optim.AdamW(
+            self.network.parameters(),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.Wd=self.hparams['Wd']
+        self.cnt=0
+        self.num_class_select=self.hparams['num_class_select']
+
+
+    def update(self, minibatches, unlabeled=None):
+
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        n=self.num_class_select
+        d=self.num_domains
+        all_y=einops.rearrange(all_y,'(n d s)->(d s n)',n=n ,d=d)
+        all_x=einops.rearrange(all_x,'(n d s) C H W->(d s n) C H W ',n=n ,d=d)
+
+        
+        batch_images = make_grid(all_x, nrow=7, normalize=True)
+        if(self.cnt==0):
+            save_image(batch_images, "./domainbed/batchimg.png",normalize=False)
+        loss=0
+        pred,dtok_feat=self.predictTrain(all_x)
+        loss+= F.cross_entropy(pred,all_y)
+    
+        Wd=self.Wd
+
+        dtok_feat=torch.chunk(dtok_feat,chunks=self.num_domains,dim=0)
+        domft0,domft1,domft2 = F.softmax(dtok_feat[0], dim=1), F.softmax(dtok_feat[1], dim=1), F.softmax(dtok_feat[2], dim=1)
+
+        # Clamp mixture distribution to avoid exploding KL divergence
+        domInvFtAvg = torch.clamp((domft0 + domft1 + domft2) / 3., 1e-7, 1).log()
+        loss += Wd * (F.kl_div(domInvFtAvg ,domft0, reduction='batchmean') +
+                        F.kl_div(domInvFtAvg,domft1,  reduction='batchmean') +
+                        F.kl_div(domInvFtAvg,domft2,  reduction='batchmean')) / 3.
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+       
+    def predictTrain(self, x):
+        return self.network(x)
+
+    def predict(self, x):
+        out,out_dist= self.network(x)
+        return out
+
 class DI_tokening_aver(Algorithm):
     """
     Deit_dist; Order of domains in training should be preserved
@@ -2285,14 +2407,14 @@ def get_jaccard_loss_from_attention(pred_attn,target_attn,threshold=0.75,N_patch
 
     return jaccard_loss(th_attn,pred_attn)
 
-def return_backbone_network(network_name,num_classes,hparams):
+def return_backbone_network(network_name,num_classes,hparams,add_di_token=True):
     if(network_name=="DeitSmall"):
         network_deit=deit_small_patch16_224(pretrained=True) 
         network_deit.head = nn.Linear(384, num_classes)
     
         attn_sep_mask=hparams["attn_sep_mask"]
         # self.network=MDVisionTransformer(img_size=224,num_classes=num_classes, distilled=True,patch_size=16, embed_dim=384, depth=12, num_heads=6,num_dist_token=1,attn_sep_mask=attn_sep_mask)
-        network=dit(img_size=224,num_classes=num_classes, distilled=False,patch_size=16, embed_dim=384, depth=12, num_heads=6,in_chans=3,add_di_token=True,attn_sep_mask=attn_sep_mask)
+        network=dit(img_size=224,num_classes=num_classes, distilled=False,patch_size=16, embed_dim=384, depth=12, num_heads=6,in_chans=3,add_di_token=add_di_token,attn_sep_mask=attn_sep_mask)
         network.load_state_dict(network_deit.state_dict(),strict=False) 
         printNetworkParams(network)
         return network
@@ -2300,31 +2422,31 @@ def return_backbone_network(network_name,num_classes,hparams):
         network_deit=deit_base_patch16_224(pretrained=True) 
         network_deit.head = nn.Linear(768, num_classes)
         attn_sep_mask=hparams["attn_sep_mask"]
-        network=dit(img_size=224,num_classes=num_classes, distilled=False,patch_size=16, embed_dim=768, depth=12, num_heads=12,in_chans=3,add_di_token=True,attn_sep_mask=attn_sep_mask)
+        network=dit(img_size=224,num_classes=num_classes, distilled=False,patch_size=16, embed_dim=768, depth=12, num_heads=12,in_chans=3,add_di_token=add_di_token,attn_sep_mask=attn_sep_mask)
         network.load_state_dict(network_deit.state_dict(),strict=False) 
         printNetworkParams(network)
         return network
     elif(network_name=="CVTSmall"):
-        network=small_cvt(pretrained=True,add_di_tok=True) 
+        network=small_cvt(pretrained=True,add_di_tok=add_di_token) 
         network.head = nn.Linear(384, num_classes)
         attn_sep_mask=hparams["attn_sep_mask"]
         printNetworkParams(network)
         return network
     elif(network_name=="CVTTiny"):
-        network=tiny_cvt(pretrained=True,add_di_tok=True) 
+        network=tiny_cvt(pretrained=True,add_di_tok=add_di_token) 
         network.head = nn.Linear(384, num_classes)
         attn_sep_mask=hparams["attn_sep_mask"]
         printNetworkParams(network)
         return network
     elif(network_name=="T2T7"):
         attn_sep_mask=hparams["attn_sep_mask"]
-        network=t2t_vit_7(pretrained=True,add_di_tok=True,attn_sep_mask=attn_sep_mask)
+        network=t2t_vit_7(pretrained=True,add_di_tok=add_di_token,attn_sep_mask=attn_sep_mask)
         network.head = nn.Linear(256, num_classes) # for t2t-7-> 256 for t2t24->512
         printNetworkParams(network)
         return network
     elif(network_name=="T2T24"):
         attn_sep_mask=hparams["attn_sep_mask"]
-        network=t2t_vit_t_24(pretrained=True,add_di_tok=True,attn_sep_mask=attn_sep_mask)
+        network=t2t_vit_t_24(pretrained=True,add_di_tok=add_di_token,attn_sep_mask=attn_sep_mask)
         network.head = nn.Linear(512, num_classes) # for t2t-7-> 256 for t2t24->512
         printNetworkParams(network)
         return network

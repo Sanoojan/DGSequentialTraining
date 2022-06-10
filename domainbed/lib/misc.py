@@ -244,7 +244,7 @@ def TsneFeatures(network, loader, weights, device, output_dir, env_name, algo_na
             
 
             # Features.append(dist_feat[:,0])
-            Features.append(di_feat)
+            Features.append(cls_feat)
             # Features2.append(DI)
             labels.append(y)
             if weights is None:

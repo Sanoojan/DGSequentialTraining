@@ -107,7 +107,7 @@ def one_train_rest_test_combinations(n):
         yield list(env)
 
 def make_args_list(n_trials, dataset_names, algorithms, n_hparams_from, n_hparams, steps,
-    data_dir, task, holdout_fraction, single_test_envs,one_train_rest_test, hparams,confusion_matrix,test_robustness,accuracy,tsne):
+    data_dir, task, holdout_fraction, single_test_envs,one_train_rest_test, hparams,confusion_matrix,test_robustness,accuracy,tsne,tsneOut_dir):
     args_list = []
     for trial_seed in range(n_trials):
         for dataset in dataset_names:
@@ -158,6 +158,7 @@ if __name__ == "__main__":
     parser.add_argument('--n_hparams_from', type=int, default=0)
     parser.add_argument('--n_hparams', type=int, default=20)
     parser.add_argument('--output_dir', type=str, required=True)
+    parser.add_argument('--tsneOut_dir', type=str, required=False)
     parser.add_argument('--data_dir', type=str, required=True)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--n_trials', type=int, default=3)
@@ -190,7 +191,8 @@ if __name__ == "__main__":
         confusion_matrix=args.confusion_matrix,
         test_robustness=args.test_robustness,
         accuracy=args.accuracy,
-        tsne=args.tsne
+        tsne=args.tsne,
+        tsneOut_dir=args.tsneOut_dir
     )
 
     jobs = [Job(train_args, args.output_dir) for train_args in args_list]

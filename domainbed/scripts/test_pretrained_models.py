@@ -48,33 +48,37 @@ def plot_features(features, labels, num_classes,filename):
         features: (num_instances, num_features).
         labels: (num_instances).
     """
-    colors = ['C0', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6']
+    colors = ['C0', 'C1', 'C2', 'C3', 'C8', 'C5', 'C6']
     class_names=['Dog','Elephant','Giraffe','Guitar','Horse','House','Person']
     if num_classes<=4:
-        colors=[ 'C7', 'C8', 'C9','C10']
+        colors=[ 'C7', 'C4', 'C9','C10']
         class_names=['Art','Cartoon','Photo','Sketch']
     unique_classes=np.unique(np.array(labels))
+
+    # class_names=[name for class in class_names[]]
+    class_names_sel=[]
     for label_idx in unique_classes:
+        class_names_sel.append(class_names[label_idx])
         plt.scatter(
             features[labels==label_idx, 0],
             features[labels==label_idx, 1],
             c=colors[label_idx],
-            s=4,
+            s=10,
         )
         plt.xticks([])
         plt.yticks([])
 
-    plt.legend(class_names, loc='upper right', bbox_to_anchor=(1.2,1), labelspacing=1.2)
+    plt.legend(class_names_sel, loc='upper right', bbox_to_anchor=(1.2,1), labelspacing=1.2)
     #dirname = osp.join(args.save_dir, prefix)
     # if not osp.exists(dirname):
     #     os.mkdir(dirname)
     # save_name = osp.join(dirname, 'epoch_' + str(epoch+1) + '.png')
-    plt.savefig(filename, bbox_inches='tight')
+    plt.savefig(filename, bbox_inches='tight',dpi=1200)
 
     plt.close()
 
 def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
-              filename: str,domain_labels=['Art','Cartoon','Photo','Sketch']):
+              filename: str,tsneOut_dir:str,domain_labels=['Art','Cartoon','Photo','Sketch']):
     
 
     labels=np.array(labels)
@@ -102,7 +106,7 @@ def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
     # plt.yticks([])
     # plt.tight_layout()
     # plt.savefig("train_all/clswise"+filename)
-    plot_features(X_tsne, labelscls, 7,"tsnedit_train_n_testF/01clswise"+filename)
+    plot_features(X_tsne, labelscls, 7,os.path.join(tsneOut_dir,"01clswise"+filename))
 
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.spines['top'].set_visible(False)
@@ -125,7 +129,7 @@ def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
     # plt.yticks([])
     # plt.tight_layout()
     # plt.savefig("train_all/domainwise"+filename)
-    plot_features(X_tsne, labelsd, 3,"tsnedit_train_n_testF/01domainwise"+filename)
+    plot_features(X_tsne, labelsd, 3,os.path.join(tsneOut_dir,"01domwise"+filename))
     # plot_features(X_tsne, labels, num_classes,filename)
 
     # fig, ax = plt.subplots(figsize=(10, 10))
@@ -186,7 +190,7 @@ if __name__ == "__main__":
     parser.add_argument('--test_robustness', type=bool, default=False)
     parser.add_argument('--accuracy', type=bool, default=False)
     parser.add_argument('--tsne', type=bool, default=True)
-    
+    parser.add_argument('--tsneOut_dir', type=str, default="./domainbed/tsneOuts/DIT_deit_small_cls_test_all")
     args = parser.parse_args()
     if(args.pretrained==None):
         onlyfiles = [f for f in os.listdir(args.output_dir) if os.path.isfile(os.path.join(args.output_dir, f))]
@@ -199,6 +203,7 @@ if __name__ == "__main__":
     algorithm_dict = None
 
     os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(args.tsneOut_dir,exist_ok=True)
     sys.stdout = misc.Tee(os.path.join(args.output_dir, 'out1.txt'))
     sys.stderr = misc.Tee(os.path.join(args.output_dir, 'err.txt'))
 
@@ -396,10 +401,10 @@ if __name__ == "__main__":
             # print(algo_name,":",name,":",acc)
             results[name+'_acc'] = acc
         elif(args.tsne):
-            if(int(name[3]) not in args.test_envs and "in" in name  ):
+            if(int(name[3]) not in args.test_envs  ):
                 continue
-            if(int(name[3]) in args.test_envs  and  "out" in name ):
-                continue
+            # if(int(name[3]) in args.test_envs  and  "out" in name ):
+            #     continue
             # if(int(name[3]) in args.test_envs ):
             #     continue
             print(name)
@@ -526,7 +531,7 @@ if __name__ == "__main__":
 
     checkpoint_vals = collections.defaultdict(lambda: [])
     if(args.tsne):
-        visualizeEd(Features_all, labels_all,tokenlabels,name_conv+".jpg")
+        visualizeEd(Features_all, labels_all,tokenlabels,name_conv+".jpg",args.tsneOut_dir)
       
 
     with open(os.path.join(args.output_dir, 'done'), 'w') as f:
