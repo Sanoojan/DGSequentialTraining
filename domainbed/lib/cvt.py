@@ -693,7 +693,7 @@ class ConvolutionalVisionTransformer(nn.Module):
         # print(x.shape(name=None))
         if self.di_token :
             return x[-1],outputs_di[-1]
-        return x
+        return x[-1]
 
 @register_model
 def small_cvt(pretrained=False,add_di_tok=False, index=0, **kwargs):
