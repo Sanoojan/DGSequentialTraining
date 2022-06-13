@@ -2409,6 +2409,10 @@ def get_jaccard_loss_from_attention(pred_attn,target_attn,threshold=0.75,N_patch
 
 def return_backbone_network(network_name,num_classes,hparams,add_di_token=True):
     if(network_name=="DeitSmall"):
+        if not (add_di_token):
+            network = deit_small_patch16_224(pretrained=True)
+            network.head = nn.Linear(384, num_classes)
+            return network
         network_deit=deit_small_patch16_224(pretrained=True) 
         network_deit.head = nn.Linear(384, num_classes)
     
