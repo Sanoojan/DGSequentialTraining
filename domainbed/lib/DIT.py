@@ -396,7 +396,7 @@ class VisionTransformer(nn.Module):
             else:
                 return x[:, 0], x[:, 1]
 
-    def forward(self, x,return_cls_feat=False):
+    def forward(self, x,return_cls_feat=False,class_di_add=False):
         
         x = self.forward_features(x)
         cls_feat=x[0]
@@ -410,6 +410,8 @@ class VisionTransformer(nn.Module):
                     return (x + x_dist) / 2
             elif(return_cls_feat):
                 x = self.head(x[0]),x[-1],cls_feat
+            elif(class_di_add):
+                x = self.head(x[0]+x[-1]),x[-1]
             else:
                 x = self.head(x[0]),x[-1]
         else:
