@@ -186,7 +186,10 @@ if __name__ == "__main__":
         if not args.skip_confirmation:
             ask_for_confirmation()
         launcher_fn = command_launchers.REGISTRY[args.command_launcher]
+        start_time=time.time()
         Job.launch(to_launch, launcher_fn)
+        stop_time=time.time()
+        print("Total time taken to Sweep: ",str((stop_time-start_time)/3600.0)," Hours")
 
     elif args.command == 'delete_incomplete':
         to_delete = [j for j in jobs if j.state == Job.INCOMPLETE]

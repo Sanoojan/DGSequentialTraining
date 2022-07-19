@@ -7,7 +7,8 @@ import torchvision.models
 
 from domainbed.lib import wide_resnet
 import copy
-
+from domainbed.lib.visiontransformer import *
+from domainbed.lib.cvt import small_cvt
 
 def remove_batch_norm_from_resnet(model):
     fuse = torch.nn.utils.fusion.fuse_conv_bn_eval
@@ -70,15 +71,38 @@ class ResNet(torch.nn.Module):
     """ResNet with the softmax chopped off and the batchnorm frozen"""
     def __init__(self, input_shape, hparams):
         super(ResNet, self).__init__()
-        if hparams['resnet18']:
-            self.network = torchvision.models.resnet18(pretrained=True)
-            self.n_outputs = 512
-        else:
-            self.network = torchvision.models.resnet50(pretrained=True)
-            self.n_outputs = 2048
-
+        if hparams['weight_init']=="ImageNet":
+            if hparams['backbone']=="Resnet18":
+                self.network = torchvision.models.resnet18(pretrained=True)
+                self.n_outputs = 512
+            else:
+                self.network = torchvision.models.resnet50(pretrained=True)
+                self.n_outputs = 2048
+        elif hparams['weight_init']=="Random":
+            if hparams['backbone']=="Resnet18":
+                self.network = torchvision.models.resnet18()
+                self.n_outputs = 512
+            else:
+                self.network = torchvision.models.resnet50()
+                self.n_outputs = 2048
+        elif hparams['weight_init']=="xavier_uniform":
+            if hparams['backbone']=="Resnet18":
+                self.network = torchvision.models.resnet18()
+                self.n_outputs = 512
+            else:
+                self.network = torchvision.models.resnet50()
+                self.n_outputs = 2048
+            self.apply(self._init_weights_xavier_uniform)
+        elif hparams['weight_init']=="trunc_normal":
+            if hparams['backbone']=="Resnet18":
+                self.network = torchvision.models.resnet18()
+                self.n_outputs = 512
+            else:
+                self.network = torchvision.models.resnet50()
+                self.n_outputs = 2048
+            self.apply(self._init_weights_trunc_normal)
         # self.network = remove_batch_norm_from_resnet(self.network)
-
+            
         # adapt number of channels
         nc = input_shape[0]
         if nc != 3:
@@ -94,6 +118,81 @@ class ResNet(torch.nn.Module):
         # save memory
         del self.network.fc
         self.network.fc = Identity()
+
+        self.freeze_bn()
+        self.hparams = hparams
+        self.dropout = nn.Dropout(hparams['resnet_dropout'])
+       
+
+    def _init_weights_xavier_uniform(self, module):
+        if isinstance(module, nn.Conv2d):
+            torch.nn.init.xavier_uniform_(module.weight)
+            if module.bias is not None:
+                torch.nn.init.xavier_uniform_(module.bias)
+
+    def _init_weights_trunc_normal(self, module):
+        if isinstance(module, nn.Conv2d):
+            torch.nn.init.trunc_normal_(module.weight,std=.02)
+            if module.bias is not None:
+                torch.nn.init.trunc_normal_(module.bias,std=.02)
+    
+    def _init_weights(self, module):
+        if isinstance(module, nn.Embedding):
+            module.weight.data.normal_(mean=0.0, std=1.0)
+            if module.padding_idx is not None:
+                module.weight.data[module.padding_idx].zero_()
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)  
+
+    def forward(self, x):
+        """Encode x into a feature vector of size n_outputs."""
+        return self.dropout(self.network(x))
+
+    def train(self, mode=True):
+        """
+        Override the default train() to freeze the BN parameters
+        """
+        super().train(mode)
+        self.freeze_bn()
+
+    def freeze_bn(self):
+        for m in self.network.modules():
+            if isinstance(m, nn.BatchNorm2d):
+                m.eval()
+
+class ViT(torch.nn.Module):
+    """ResNet with the softmax chopped off and the batchnorm frozen"""
+    def __init__(self, input_shape, hparams,num_classes):
+        super(ViT, self).__init__()
+        if hparams['weight_init']=="ImageNet":
+            if hparams['backbone']=="DeitSmall":
+                self.network = deit_small_patch16_224(pretrained=True)
+                self.network.head = nn.Linear(384, num_classes)
+            elif hparams['backbone']=="CVTSmall":
+                self.network = small_cvt(pretrained=True)
+                self.network.head = nn.Linear(384, num_classes)
+            else:
+                raise NotImplementedError
+        elif hparams['weight_init']=="Random":
+            if hparams['backbone']=="DeitSmall":
+                self.network = deit_small_patch16_224(pretrained=False)
+                self.network.head = nn.Linear(384, num_classes)
+            elif hparams['backbone']=="CVTSmall":
+                self.network = small_cvt(pretrained=False)
+                self.network.head = nn.Linear(384, num_classes)
+            else:
+                raise NotImplementedError
+        elif hparams['weight_init']=="xavier_uniform":
+            if hparams['backbone']=="DeitSmall":
+                self.network = deit_small_patch16_224(pretrained=False,weight_init='xavier')
+                self.network.head = nn.Linear(384, num_classes)
+            elif hparams['backbone']=="CVTSmall":
+                self.network = small_cvt(pretrained=False,init="xavier")
+                self.network.head = nn.Linear(384, num_classes)
+            else:
+                raise NotImplementedError
+        # self.network = remove_batch_norm_from_resnet(self.network)
 
         self.freeze_bn()
         self.hparams = hparams
@@ -183,6 +282,9 @@ class ContextNet(nn.Module):
 
 def Featurizer(input_shape, hparams):
     """Auto-select an appropriate featurizer for the given input shape."""
+    if( hparams["backbone"]=="DeitSmall" or hparams["backbone"]=="CVTSmall"):
+        print("not supported for this algorithm")
+        raise NotImplementedError
     if len(input_shape) == 1:
         return MLP(input_shape[0], hparams["mlp_width"], hparams)
     elif input_shape[1:3] == (28, 28):
@@ -195,7 +297,7 @@ def Featurizer(input_shape, hparams):
         raise NotImplementedError
 
 
-def Classifier(in_features, out_features, is_nonlinear=False):
+def Classifier(in_features, out_features, is_nonlinear=False,init=None):
     if is_nonlinear:
         return torch.nn.Sequential(
             torch.nn.Linear(in_features, in_features // 2),
@@ -204,7 +306,11 @@ def Classifier(in_features, out_features, is_nonlinear=False):
             torch.nn.ReLU(),
             torch.nn.Linear(in_features // 4, out_features))
     else:
-        return torch.nn.Linear(in_features, out_features)
+        lin= torch.nn.Linear(in_features, out_features)
+        if init=="xavier_uniform":
+            torch.nn.init.xavier_uniform_(lin.weight)
+            lin.bias.data.fill_(0.01)
+        return lin
 
 
 class WholeFish(nn.Module):

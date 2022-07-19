@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.autograd as autograd
 from torch.autograd import Variable
-
+from torchvision import transforms
 import copy
 import numpy as np
 from collections import defaultdict, OrderedDict
@@ -16,6 +16,7 @@ except:
     backpack = None
 
 from domainbed import networks
+
 from domainbed.lib.misc import (
     random_pairs_of_minibatches, ParamDict, MovingAverage, l2_between_dicts
 )
@@ -90,9 +91,11 @@ class ERM(Algorithm):
         self.classifier = networks.Classifier(
             self.featurizer.n_outputs,
             num_classes,
-            self.hparams['nonlinear_classifier'])
+            self.hparams['nonlinear_classifier'],init=self.hparams['weight_init'])
 
         self.network = nn.Sequential(self.featurizer, self.classifier)
+        # print(self.network)
+        printNetworkParams(self.network)
         self.optimizer = torch.optim.Adam(
             self.network.parameters(),
             lr=self.hparams["lr"],
@@ -113,6 +116,82 @@ class ERM(Algorithm):
     def predict(self, x):
         return self.network(x)
 
+class ERM_ViT(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_ViT, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        self.network = networks.ViT(input_shape, self.hparams,num_classes)
+        printNetworkParams(self.network)
+        self.optimizer = torch.optim.Adam(
+            self.network.parameters(),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        loss = F.cross_entropy(self.predict(all_x), all_y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        return self.network(x)
+
+class ERM_LowResolution_Pre(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_LowResolution_Pre, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+        self.featurizer = networks.Featurizer(input_shape, self.hparams)
+        self.classifier = networks.Classifier(
+            self.featurizer.n_outputs,
+            num_classes,
+            self.hparams['nonlinear_classifier'],init=self.hparams['weight_init'])
+
+        self.network = nn.Sequential(self.featurizer, self.classifier)
+        # print(self.network)
+        printNetworkParams(self.network)
+        self.optimizer = torch.optim.Adam(
+            self.network.parameters(),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.cnt=0
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        # if(self.cnt<2500):
+        #     t=transforms.Resize((50,50))
+        #     all_x=t(all_x)
+        if(self.cnt<5000):
+            t=transforms.Resize((100,100))
+            all_x=t(all_x)
+        # elif(self.cnt<7500):
+        #     t=transforms.Resize((150,150))
+        #     all_x=t(all_x)
+        loss = F.cross_entropy(self.predict(all_x), all_y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        return self.network(x)
 
 class Fish(Algorithm):
     """
@@ -1614,3 +1693,7 @@ class IB_IRM(ERM):
                 'nll': nll.item(),
                 'IRM_penalty': irm_penalty.item(), 
                 'IB_penalty': ib_penalty.item()}
+
+def printNetworkParams(net):
+    pytorch_total_trainable_params = sum(p.numel() for p in net.parameters() if p.requires_grad)
+    print("pytorch_total_trainable_params:",pytorch_total_trainable_params)
