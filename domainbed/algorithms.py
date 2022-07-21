@@ -173,15 +173,55 @@ class ERM_LowResolution_Pre(Algorithm):
     def update(self, minibatches, unlabeled=None):
         all_x = torch.cat([x for x,y in minibatches])
         all_y = torch.cat([y for x,y in minibatches])
-        # if(self.cnt<2500):
-        #     t=transforms.Resize((50,50))
-        #     all_x=t(all_x)
         if(self.cnt<5000):
-            t=transforms.Resize((100,100))
+            t=transforms.Resize((48,48))
             all_x=t(all_x)
-        # elif(self.cnt<7500):
-        #     t=transforms.Resize((150,150))
-        #     all_x=t(all_x)
+        elif(self.cnt<10000):
+            t=transforms.Resize((112,112))
+            all_x=t(all_x)
+        elif(self.cnt<15000):
+            t=transforms.Resize((160,160))
+            all_x=t(all_x)
+        loss = F.cross_entropy(self.predict(all_x), all_y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        return self.network(x)
+
+class ERM_ViT_LowResolution_Pre(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_ViT_LowResolution_Pre, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        self.network = networks.ViT(input_shape, self.hparams,num_classes)
+        printNetworkParams(self.network)
+        self.optimizer = torch.optim.Adam(
+            self.network.parameters(),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.cnt=0
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        if(self.cnt<5000):
+            t=transforms.Resize((48,48))
+            all_x=t(all_x)
+        elif(self.cnt<10000):
+            t=transforms.Resize((112,112))
+            all_x=t(all_x)
+        elif(self.cnt<15000):
+            t=transforms.Resize((160,160))
+            all_x=t(all_x)
         loss = F.cross_entropy(self.predict(all_x), all_y)
 
         self.optimizer.zero_grad()

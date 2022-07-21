@@ -198,6 +198,7 @@ class MultipleEnvironmentImageFolder(MultipleDomainDataset):
             transforms.ToTensor(),
             transforms.Normalize(
                 mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            AddGaussianNoise(0., 1.,hparams['noise_probability'])
         ])
 
         self.datasets = []
@@ -355,3 +356,16 @@ class WILDSFMoW(WILDSDataset):
         super().__init__(
             dataset, "region", test_envs, hparams['data_augmentation'], hparams)
 
+class AddGaussianNoise(object):
+    def __init__(self, mean=0., std=1.,prob=0.):
+        self.std = std
+        self.mean = mean
+        self.p = prob
+        
+    def __call__(self, tensor):
+        if torch.rand(1) < self.p:
+            return tensor + torch.randn(tensor.size()) * self.std + self.mean
+        return tensor
+    
+    def __repr__(self):
+        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
