@@ -39,4 +39,11 @@ tsnedit_train/
 Tsnedit_test/
 tsnedit_train_test/
 tsnedit_train_n_testF/
+domainbed/scripts/test_pretrained_models.py
+train_all/
+domainbed/tsneOuts/
+domainbed/outputs_new/
+domainbed/Outputs_old/
+
+domainbed/new_outputs/
 domainbed/outputs-new/

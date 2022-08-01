@@ -107,7 +107,7 @@ def one_train_rest_test_combinations(n):
         yield list(env)
 
 def make_args_list(n_trials, dataset_names, algorithms, n_hparams_from, n_hparams, steps,
-    data_dir, task, holdout_fraction, single_test_envs,one_train_rest_test, hparams,confusion_matrix,test_robustness,accuracy,tsne,tsneOut_dir):
+    data_dir, task, holdout_fraction, single_test_envs,one_train_rest_test, hparams,confusion_matrix,test_robustness,accuracy,tsne,tsneOut_dir,backbone):
     args_list = []
     for trial_seed in range(n_trials):
         for dataset in dataset_names:
@@ -131,6 +131,7 @@ def make_args_list(n_trials, dataset_names, algorithms, n_hparams_from, n_hparam
                         train_args['hparams_seed'] = hparams_seed
                         train_args['data_dir'] = data_dir
                         train_args['task'] = task
+                        train_args['backbone']=backbone
                         train_args['trial_seed'] = trial_seed
                         train_args['seed'] = misc.seed_hash(dataset,
                             algorithm, test_envs, hparams_seed, trial_seed)
@@ -168,13 +169,14 @@ if __name__ == "__main__":
     parser.add_argument('--holdout_fraction', type=float, default=0.2)
     parser.add_argument('--one_train_rest_test', action='store_true')
     parser.add_argument('--single_test_envs', action='store_true')
+    parser.add_argument('--backbone', type=str, default="DeitSmall")
     parser.add_argument('--skip_confirmation', action='store_true')
     parser.add_argument('--confusion_matrix', type=bool, default=False)
     parser.add_argument('--test_robustness', type=bool, default=False)
     parser.add_argument('--accuracy', type=bool, default=True)
     parser.add_argument('--tsne', type=bool, default=True)
     args = parser.parse_args()
-
+  
     args_list = make_args_list(
         n_trials=args.n_trials,
         dataset_names=args.datasets,
@@ -192,6 +194,7 @@ if __name__ == "__main__":
         test_robustness=args.test_robustness,
         accuracy=args.accuracy,
         tsne=args.tsne,
+        backbone=args.backbone,
         tsneOut_dir=args.tsneOut_dir
     )
 

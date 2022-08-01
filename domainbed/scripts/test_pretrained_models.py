@@ -9,6 +9,7 @@ import os
 import random
 import sys
 import time
+import copy
 import uuid
 from collections import Counter
 from math import ceil
@@ -39,7 +40,7 @@ def load_model(fname):
         dump["model_num_domains"],
         dump["model_hparams"])
     
-    algorithm.load_state_dict(dump["model_dict"],strict=False)
+    algorithm.load_state_dict(dump["model_dict"],strict=True)
     return algorithm
 
 def plot_features(features, labels, num_classes,filename):
@@ -51,7 +52,7 @@ def plot_features(features, labels, num_classes,filename):
     colors = ['C0', 'C1', 'C2', 'C3', 'C8', 'C5', 'C6']
     class_names=['Dog','Elephant','Giraffe','Guitar','Horse','House','Person']
     if num_classes<=4:
-        colors=[ 'C7', 'C4', 'C9','C10']
+        colors=[ 'C0', 'C1', 'C3','C8']
         class_names=['Art','Cartoon','Photo','Sketch']
     unique_classes=np.unique(np.array(labels))
 
@@ -96,16 +97,6 @@ def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
     ax.spines['left'].set_visible(False)
  
     labelscls=labels%10
-    # palette = sn.color_palette("bright",(np.unique(labelscls)).size)
-    # sn.scatterplot(X_tsne[:, 0], X_tsne[:, 1], hue=labelscls, legend='full', palette=palette)
-    # plt.setp(ax.get_legend().get_texts(), fontsize='22') # for legend text
-    # plt.setp(ax.get_legend().get_title(), fontsize='32') # for legend title
-    # # sn.FacetGrid(tsne_df,hue="label",height=10).map(plt.scatter,'Dim_1','Dim_2')
-    # # plt.scatter(X_tsne[:, 0], X_tsne[:, 1], c=labels, s=20)
-    # plt.xticks([])
-    # plt.yticks([])
-    # plt.tight_layout()
-    # plt.savefig("train_all/clswise"+filename)
     plot_features(X_tsne, labelscls, 7,os.path.join(tsneOut_dir,"01clswise"+filename))
 
     fig, ax = plt.subplots(figsize=(10, 10))
@@ -120,47 +111,8 @@ def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
     for lab in (labelsd):
         named_labels.append(domain_labels[int(lab)])
 
-    # palette = sn.color_palette("bright", (np.unique(labelsd)).size)
-    # sn.scatterplot(X_tsne[:, 0], X_tsne[:, 1], hue=named_labels, legend='full', palette=palette)
-
-    # plt.setp(ax.get_legend().get_texts(), fontsize='22') # for legend text
-    # plt.setp(ax.get_legend().get_title(), fontsize='32') # for legend title
-    # plt.xticks([])
-    # plt.yticks([])
-    # plt.tight_layout()
-    # plt.savefig("train_all/domainwise"+filename)
     plot_features(X_tsne, labelsd, 3,os.path.join(tsneOut_dir,"01domwise"+filename))
-    # plot_features(X_tsne, labels, num_classes,filename)
 
-    # fig, ax = plt.subplots(figsize=(10, 10))
-    # ax.spines['top'].set_visible(False)
-    # ax.spines['right'].set_visible(False)
-    # ax.spines['bottom'].set_visible(False)
-    # ax.spines['left'].set_visible(False)
-
-    # palette = sn.color_palette("bright", 2)
-    # sn.scatterplot(X_tsne[:, 0], X_tsne[:, 1], hue=tokenlabels, legend='full', palette=palette)
-    # # sn.FacetGrid(tsne_df,hue="label",height=10).map(plt.scatter,'Dim_1','Dim_2')
-    # # plt.scatter(X_tsne[:, 0], X_tsne[:, 1], c=labels, s=20)
-    # plt.xticks([])
-    # plt.yticks([])
-    # plt.savefig("TsneNew/Itok_"+filename)
-
-
-    #PCA
-    # fig, ax = plt.subplots(figsize=(10, 10))
-    # ax.spines['top'].set_visible(False)
-    # ax.spines['right'].set_visible(False)
-    # ax.spines['bottom'].set_visible(False)
-    # ax.spines['left'].set_visible(False)
-
-    # palette = sn.color_palette("bright", 2)
-    # sn.scatterplot(X_PCA[:, 0], X_PCA[:, 1], hue=tokenlabels, legend='full', palette=palette)
-    # # sn.FacetGrid(tsne_df,hue="label",height=10).map(plt.scatter,'Dim_1','Dim_2')
-    # # plt.scatter(X_tsne[:, 0], X_tsne[:, 1], c=labels, s=20)
-    # plt.xticks([])
-    # plt.yticks([])
-    # plt.savefig("TsneFIG5/PCA_DI_DS"+filename)
 
 
 if __name__ == "__main__":
@@ -184,13 +136,15 @@ if __name__ == "__main__":
     parser.add_argument('--holdout_fraction', type=float, default=0.2)
     parser.add_argument('--uda_holdout_fraction', type=float, default=0,
         help="For domain adaptation, % of test to use unlabeled for training.")
+    parser.add_argument('--backbone', type=str, default="DeitSmall")
     parser.add_argument('--pretrained', type=str, default=None)
     parser.add_argument('--algo_name', type=str, default=None)
     parser.add_argument('--confusion_matrix', type=bool, default=False)
     parser.add_argument('--test_robustness', type=bool, default=False)
-    parser.add_argument('--accuracy', type=bool, default=False)
-    parser.add_argument('--tsne', type=bool, default=True)
-    parser.add_argument('--tsneOut_dir', type=str, default="./domainbed/tsneOuts/DIT_deit_small_cls_test_all")
+    parser.add_argument('--accuracy', type=bool, default=True)
+    parser.add_argument('--tsne', type=bool, default=False)
+    parser.add_argument('--flatness', type=bool, default=False)
+    parser.add_argument('--tsneOut_dir', type=str, default="./domainbed/tsneOuts/DIT_deit_small_di_train")
     args = parser.parse_args()
     if(args.pretrained==None):
         onlyfiles = [f for f in os.listdir(args.output_dir) if os.path.isfile(os.path.join(args.output_dir, f))]
@@ -387,7 +341,7 @@ if __name__ == "__main__":
     evals = zip(eval_loader_names, eval_loaders, eval_weights)
     algo_name=args.algo_name
 
-    name_conv=algo_name+str(args.test_envs)+"_tr"+str(args.trial_seed)+"cls token"
+    name_conv=algo_name+str(args.test_envs)+"_tr"+str(args.trial_seed)+"di token"
     if(args.tsne):
         if(os.path.exists("tsne/TSVS/meta_"+name_conv+".tsv")):
             os.remove("tsne/TSVS/meta_"+name_conv+".tsv")
@@ -401,12 +355,12 @@ if __name__ == "__main__":
             # print(algo_name,":",name,":",acc)
             results[name+'_acc'] = acc
         elif(args.tsne):
-            if(int(name[3]) not in args.test_envs  ):
-                continue
+            # if(int(name[3]) not in args.test_envs and  "in" in name ):
+            #     continue
             # if(int(name[3]) in args.test_envs  and  "out" in name ):
             #     continue
-            # if(int(name[3]) in args.test_envs ):
-            #     continue
+            if(int(name[3]) in args.test_envs ):
+                continue
             print(name)
             Features,labels=misc.TsneFeatures(algorithm, loader, weights, device,args.output_dir,env_name,algo_name)
             
@@ -427,10 +381,12 @@ if __name__ == "__main__":
                     tokenlabels.append("DS") if i<len(labels)/2 else tokenlabels.append("DI")
                     record_file.write(str(labels[i]))
                     record_file.write("\n")
-        elif(args.get_loss  and  "in" in name):
+        elif(args.flatness  and  "in" in name):
             # Computing Flatness (comment gaussian noise with std for random normal scaling)
+            
             loss_degr=[]
-            x=list(np.arange(0.0,0.055,0.005))
+            # x=list(np.arange(0.0,0.055,0.005))
+            x=[0,10,20,30,40,50,60]
             loss,acc=misc.loss_ret(algorithm, loader, weights, device)
             loss_degr.append(loss.item())
             accuracies=[]
@@ -440,7 +396,7 @@ if __name__ == "__main__":
                     continue
                 total_loss=0
                 tot_accuracy=0
-                for j in range(10):
+                for j in range(50):
 
                     algo_cpy=copy.deepcopy(algorithm)
                     net=algo_cpy.network
@@ -451,7 +407,7 @@ if __name__ == "__main__":
                     unit_direction_vector = direction_vector / torch.norm(direction_vector)
                     unit_direction_vector*=rad
 
-                    unit_direction_vector=torch.normal(0.0, float(rad), size=(sum(p.numel() for p in net.parameters() if p.requires_grad),))  #gaussian noise with std
+                    # unit_direction_vector=torch.normal(0.0, float(rad), size=(sum(p.numel() for p in net.parameters() if p.requires_grad),))  #gaussian noise with std
                     i=0
                     for k,w in Ws.items():
 
@@ -466,11 +422,11 @@ if __name__ == "__main__":
                     loss_diff=loss_ch-loss
                     total_loss+=loss_ch
                     tot_accuracy+=acc
-                total_loss/=10.0
-                tot_accuracy/=10.0
-                print(rad)
-                print(total_loss)
-                print(tot_accuracy)
+                total_loss/=50.0
+                tot_accuracy/=50.0
+                # print(rad)
+                # print(total_loss)
+                # print(tot_accuracy)
                 loss_degr.append(total_loss.item())
                 accuracies.append(tot_accuracy)
                 
@@ -490,11 +446,17 @@ if __name__ == "__main__":
                 record_file.write("#"+algo_name+"test_env"+str(args.test_envs)+"train_env"+str(int(name[3])))
                 record_file.write("\t")
                 record_file.write("\n")
-                record_file.write("l=")
-                record_file.write(str(loss_degr))
+                if(int(name[3]) == args.test_envs[0]):
+                    record_file.write("ltest"+str(args.test_envs[0])+"+=")
+                else:
+                    record_file.write("l"+str(args.test_envs[0])+"+=")
+                record_file.write("np.array("+str(loss_degr)+")")
                 record_file.write("\n")
-                record_file.write("ac=")
-                record_file.write(str(accuracies))
+                if(int(name[3]) == args.test_envs[0]):
+                    record_file.write("actest"+str(args.test_envs[0])+"+=")
+                else:            
+                    record_file.write("ac"+str(args.test_envs[0])+"+=")
+                record_file.write("np.array("+str(accuracies)+")")
                 record_file.write("\n")
         elif (int(name[3]) in args.test_envs and  "in" in name):
             print("name",name)

@@ -135,7 +135,7 @@ class VisionTransformer(nn.Module):
     """ Vision Transformer """
     def __init__(self, img_size=[224], patch_size=16, in_chans=3, num_classes=0, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
-                 drop_path_rate=0., norm_layer=nn.LayerNorm, **kwargs):
+                 drop_path_rate=0., norm_layer=nn.LayerNorm,distilled=False,num_dist_token=0, **kwargs):
         super().__init__()
         self.num_features = self.embed_dim = embed_dim
 
@@ -144,7 +144,12 @@ class VisionTransformer(nn.Module):
         num_patches = self.patch_embed.num_patches
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        self.dist_tokens = nn.Parameter(torch.zeros(1, num_dist_token, embed_dim)) if distilled else None
+        self.distilled=distilled
+        self.num_dist_token=num_dist_token
+
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
+        self.pos_embed2=nn.Parameter(torch.zeros(1, num_dist_token, embed_dim))
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
@@ -157,8 +162,11 @@ class VisionTransformer(nn.Module):
 
         # Classifier head
         self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
-
+        self.head_dist = nn.Linear(embed_dim, num_classes)
         trunc_normal_(self.pos_embed, std=.02)
+        if distilled:
+            trunc_normal_(self.pos_embed2, std=.02) 
+            trunc_normal_(self.dist_tokens, std=.02)
         trunc_normal_(self.cls_token, std=.02)
         self.apply(self._init_weights)
 
@@ -178,6 +186,10 @@ class VisionTransformer(nn.Module):
             return self.pos_embed
         class_pos_embed = self.pos_embed[:, 0]
         patch_pos_embed = self.pos_embed[:, 1:]
+        if self.distilled:
+            dist_pos_embed=self.pos_embed2
+        
+            
         dim = x.shape[-1]
         w0 = w // self.patch_embed.patch_size
         h0 = h // self.patch_embed.patch_size
@@ -191,6 +203,8 @@ class VisionTransformer(nn.Module):
         )
         assert int(w0) == patch_pos_embed.shape[-2] and int(h0) == patch_pos_embed.shape[-1]
         patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
+        if self.distilled:
+            return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed,dist_pos_embed), dim=1)
         return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed), dim=1)
 
     def prepare_tokens(self, x):
@@ -200,7 +214,8 @@ class VisionTransformer(nn.Module):
         # add the [CLS] token to the embed patch tokens
         cls_tokens = self.cls_token.expand(B, -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
-
+        if self.distilled:
+            x = torch.cat((x,self.dist_tokens.expand(x.shape[0], -1, -1)), dim=1)
         # add positional encoding to each token
         x = x + self.interpolate_pos_encoding(x, w, h)
 
@@ -211,7 +226,10 @@ class VisionTransformer(nn.Module):
         for blk in self.blocks:
             x = blk(x)
         x = self.norm(x)
-        return x[:, 0]
+       
+        if self.distilled:
+            return self.head(x[:, 0]),self.head_dist(x[:, -self.num_dist_token:])
+        return self.head(x[:, 0])
 
     def get_last_selfattention(self, x):
         x = self.prepare_tokens(x)
@@ -240,10 +258,10 @@ def vit_tiny(patch_size=16, **kwargs):
     return model
 
 
-def vit_small(patch_size=16, **kwargs):
+def vit_small(patch_size=16,distilled=False,num_dist_token=0,num_classes=0, **kwargs):
     model = VisionTransformer(
-        patch_size=patch_size, embed_dim=384, depth=12, num_heads=6, mlp_ratio=4,
-        qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+        patch_size=patch_size, embed_dim=384, depth=12, num_heads=6, mlp_ratio=4,num_classes=num_classes,
+        qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), distilled=distilled,num_dist_token=num_dist_token,**kwargs)
     return model
 
 
