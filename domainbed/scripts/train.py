@@ -53,6 +53,7 @@ if __name__ == "__main__":
     parser.add_argument('--skip_model_save', action='store_true')
     parser.add_argument('--save_model_every_checkpoint', action='store_true')
     parser.add_argument('--save_best_model', action='store_true')
+    parser.add_argument('--backbone', type=str, default="DeitSmall")
     args = parser.parse_args()
     args.save_best_model=True
     # If we ever want to implement checkpointing, just persist these values
@@ -184,11 +185,16 @@ if __name__ == "__main__":
         for i in range(len(out_splits))]
     eval_loader_names += ['env{}_uda'.format(i)
         for i in range(len(uda_splits))]
-
-    algorithm_class = algorithms.get_algorithm_class(args.algorithm)
     queue_var.current_test_env=args.test_envs
-    algorithm = algorithm_class(dataset.input_shape, dataset.num_classes,
-        len(dataset) - len(args.test_envs), hparams)
+    algorithm_class = algorithms.get_algorithm_class(args.algorithm)
+    if args.algorithm in ('DI_tokening','ERM_ViT','DI_tokening_vit'):
+        algorithm = algorithm_class(dataset.input_shape, dataset.num_classes,
+            len(dataset) - len(args.test_envs), hparams,args.backbone)
+    else:
+        algorithm = algorithm_class(dataset.input_shape, dataset.num_classes,
+            len(dataset) - len(args.test_envs), hparams)
+
+    
     
     if algorithm_dict is not None:
         algorithm.load_state_dict(algorithm_dict)

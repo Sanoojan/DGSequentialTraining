@@ -22,6 +22,7 @@ from collections import Counter
 # from domainbed import algorithms
 # from domainbed.visiontransformer import VisionTransformer
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
 
 def l2_between_dicts(dict_1, dict_2):
     assert len(dict_1) == len(dict_2)
@@ -173,6 +174,8 @@ def accuracy(network, loader, weights, device,noise_sd=0.5,addnoise=False):
                 batch_weights = weights[weights_offset : weights_offset + len(x)]
                 weights_offset += len(x)
             batch_weights = batch_weights.to(device)
+            if len(p.shape)==1:
+                p = p.reshape(1,-1)
             if p.size(1) == 1:
                 # if p.size(1) == 1:
                 correct += (p.gt(0).eq(y).float() * batch_weights.view(-1, 1)).sum().item()
@@ -240,11 +243,11 @@ def TsneFeatures(network, loader, weights, device, output_dir, env_name, algo_na
             y = y.to(device)
 
             # p,x_dist,cls_feat,dist_feat = Transnetwork(x,return_cls_dist_feat=True) #MDT
-            p,di_feat,cls_feat = Transnetwork(x,return_cls_feat=True) # vit
-            
+            # p,cls_feat = Transnetwork(x,return_cls_feat=True) # vit
+            p,DI_feat,cls_feat = Transnetwork(x,return_cls_feat=True) # vit
 
             # Features.append(dist_feat[:,0])
-            Features.append(cls_feat)
+            Features.append(DI_feat)
             # Features2.append(DI)
             labels.append(y)
             if weights is None:
@@ -279,6 +282,131 @@ def TsneFeatures(network, loader, weights, device, output_dir, env_name, algo_na
     # print(len(Features))
     # print(Features[0].shape)
     return Features,labels
+
+def loss_ret(network, loader, weights, device,noise_sd=0.5,addnoise=False):
+    correct = 0
+    total = 0
+    weights_offset = 0
+    total_loss=0
+    network.eval()
+    counter=0
+    with torch.no_grad():
+        for x, y in loader:
+            counter+=1
+            x = x.to(device)
+            y = y.to(device)
+            # p,output_rb = network.network(x,flatness=True)
+            if(addnoise):
+                x=x + torch.randn_like(x, device='cuda') * noise_sd
+            p = network.predict(x)
+            
+            loss=F.cross_entropy(p,y)
+            # rb_loss = F.kl_div(
+            #     F.log_softmax(output_rb / 6.0, dim=1),
+            #     ## RB output cls token, original network output cls token
+            #     F.log_softmax(p / 6.0, dim=1),
+            #     reduction='sum',
+            #     log_target=True
+            # ) * (6.0 * 6.0) / output_rb.numel()
+
+            total_loss+=loss
+            # +0.5*rb_loss
+            if weights is None:
+                batch_weights = torch.ones(len(x))
+            else:
+                batch_weights = weights[weights_offset: weights_offset + len(x)]
+                weights_offset += len(x)
+            batch_weights = batch_weights.to(device)
+            # print(p.shape)
+            if len(p.shape)==1:
+                p = p.reshape(1,-1)
+            if p.size(1) == 1:
+
+                # if p.size(1) == 1:
+                correct += (p.gt(0).eq(y).float() * batch_weights.view(-1, 1)).sum().item()
+            else:
+                # print('p hai ye', p.size(1))
+                correct += (p.argmax(1).eq(y).float() * batch_weights).sum().item()
+            total += batch_weights.sum().item()
+    network.train()
+
+    return total_loss/(counter*1.0),correct / total
+
+def confusionMatrix(network, loader, weights, device, output_dir, env_name, algo_name,args,algorithm_class,dataset,hparams):
+    trials=3
+    
+    
+    if algo_name is None:
+        algo_name = type(network).__name__
+    conf_mat_all=[]
+    
+    for i in range(trials):
+        pretrained_path=args.pretrained
+        pretrained_path=pretrained_path[:-14]+str(i)+pretrained_path[-13:]
+        network = algorithm_class(dataset.input_shape, dataset.num_classes,
+            len(dataset) - len(args.test_envs), hparams,pretrained_path) #args.pretrained
+        network.to(device)
+        correct = 0
+        total = 0
+        weights_offset = 0
+        y_pred = []
+        y_true = []
+        
+        with torch.no_grad():
+            for x, y in loader:
+                x = x.to(device)
+                y = y.to(device)
+                p = network.predict(x)
+                pred = p.argmax(1)
+                y_true = y_true + y.to("cpu").numpy().tolist()
+                y_pred = y_pred + pred.to("cpu").numpy().tolist()
+                # print(y_true)
+                # print("hashf")
+                # print(y_pred)
+                if weights is None:
+                    batch_weights = torch.ones(len(x))
+                else:
+                    batch_weights = weights[weights_offset: weights_offset + len(x)]
+                    weights_offset += len(x)
+                batch_weights = batch_weights.to(device)
+                if p.size(1) == 1:
+                    # if p.size(1) == 1:
+                    correct += (p.gt(0).eq(y).float() * batch_weights.view(-1, 1)).sum().item()
+                else:
+                    # print('p hai ye', p.size(1))
+                    correct += (p.argmax(1).eq(y).float() * batch_weights).sum().item()
+                total += batch_weights.sum().item()
+        
+        conf_mat = confusion_matrix(y_true, y_pred)
+        # print(confusion_matrix(y_true, y_pred))
+        conf_mat_all.append(conf_mat)
+        print(conf_mat, 'cf_matrix')
+    conf_mat=(conf_mat_all[0]+conf_mat_all[1]+conf_mat_all[2])/(trials*1.0)
+    conf_mat=conf_mat.astype('int')
+    print(conf_mat, 'cf_matrix_average')
+    conf_mat=conf_mat/np.sum(conf_mat,axis=1,keepdims=True) #percentage calculator
+
+    sn.set(font_scale=20)  # for label size
+    plt.figure(figsize=(90, 90))
+    # sn.heatmap(conf_mat, cbar=False,square=True, annot=True,annot_kws={"size": 90},fmt='d',xticklabels=['DG','EP','GF','GT','HR','HS','PR'],yticklabels=['DG','EP','GF','GT','HR','HS','PR'])  # font size
+    ax=sn.heatmap(conf_mat, cmap="Blues", cbar=True,linewidths=4, square=True, annot=True,fmt='.1%',annot_kws={"size": 155},xticklabels=['0','1','2','3','4','5','6'],yticklabels=['0','1','2','3','4','5','6'])  # font size
+    # ax=sn.heatmap(conf_mat, cbar=True, cmap="Blues",annot=True,fmt='.1%',annot_kws={"size": 90},linewidths=4, square = True, xticklabels=['0','1','2','3','4','5','6'],yticklabels=['0','1','2','3','4','5','6'])  # font size
+    # ax=sn.heatmap(conf_mat, cbar=True, cmap="Blues",annot=True,fmt='.1%',annot_kws={"size": 90},linewidths=4, square = True, xticklabels=['0','1','2','3','4','5','6'],yticklabels=['0','1','2','3','4','5','6'])  # font size
+    plt.yticks(rotation=0)
+    ax.xaxis.tick_top() # x axis on top
+    ax.xaxis.set_label_position('top')
+    ax.axhline(y=0, color='k',linewidth=10)
+    ax.axhline(y=conf_mat.shape[1], color='k',linewidth=10)
+
+    ax.axvline(x=0, color='k',linewidth=10)
+    ax.axvline(x=conf_mat.shape[1], color='k',linewidth=10)
+    # plt.show()
+    plt.savefig('Confusion_matrices/'+algo_name+env_name+'.png',bbox_inches='tight')
+
+
+    
+
+    return correct / total
 
 def plot_block_accuracy2(network, loader, weights, device,output_dir,env_name,algo_name):
 

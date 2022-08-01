@@ -267,7 +267,7 @@ class MDVisionTransformer(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=True, representation_size=None, distilled=False,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0., embed_layer=PatchEmbed, norm_layer=None,
-                 act_layer=None, weight_init='',num_dist_token=3,attn_sep_mask=False,mask_clsT_distT=True,mask_dist_other_patches=False):
+                 act_layer=None, weight_init='',num_dist_token=3,attn_sep_mask=False,mask_clsT_distT=True,mask_dist_other_patches=False,num_domains_to_tok=0):
         """
         Args:
             img_size (int, tuple): input image size
@@ -331,8 +331,11 @@ class MDVisionTransformer(nn.Module):
         self.concHead= nn.Linear(self.num_features*2, num_classes) if num_classes > 0 else nn.Identity()  #  for concatenatinated feat 
         self.head_dists = None
         if distilled:
-            self.head_dists =nn.ModuleList([nn.Linear(self.embed_dim, self.num_classes).to("cuda") if num_classes > 0 else nn.Identity() for _ in range(num_dist_token)]) 
-
+            if num_domains_to_tok>0 and num_dist_token==1:
+                self.head_dists =nn.ModuleList([nn.Linear(self.embed_dim, num_domains_to_tok).to("cuda") if num_classes > 0 else nn.Identity() for _ in range(num_dist_token)])
+            else:
+                self.head_dists =nn.ModuleList([nn.Linear(self.embed_dim, self.num_classes).to("cuda") if num_classes > 0 else nn.Identity() for _ in range(num_dist_token)]) 
+            # self.head_dists=nn.Linear(self.num_features, num_classes) if num_classes > 0 else nn.Identity()  
         self.init_weights(weight_init)
 
     def init_weights(self, mode=''):
@@ -373,7 +376,7 @@ class MDVisionTransformer(nn.Module):
         if self.num_tokens == 2:
             [nn.Linear(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity() for _ in range(self.num_dist_token)]
 
-    def forward_features(self, x):
+    def forward_features(self, x,ret_all_blocks=False):
         x = self.patch_embed(x)
         cls_token = self.cls_token.expand(x.shape[0], -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         if self.dist_tokens is None:
@@ -381,16 +384,27 @@ class MDVisionTransformer(nn.Module):
         else:
             x = torch.cat((cls_token, x,self.dist_tokens.expand(x.shape[0], -1, -1)), dim=1)
         x = self.pos_drop(x + torch.cat([self.pos_embed,self.pos_embed2],dim=1))
-        x = self.blocks(x)
+        all_blocks_outs=[]
+        for blk in self.blocks:
+            x=blk(x)
+            all_blocks_outs.append(self.norm(x))
+        
+        if ret_all_blocks:
+            return [t[:,0] for t in all_blocks_outs], [t[:,-self.num_dist_token:] for t in all_blocks_outs]
+
+        # x = self.blocks(x)
         x = self.norm(x)
         if self.dist_tokens is None:
             return self.pre_logits(x[:, 0])
         else:
             return x[:, 0], x[:, -self.num_dist_token:]
 
-    def forward(self, x,return_dist_inf=False,concat_feat=False,return_cls_dist_feat=False):
-        x = self.forward_features(x)
+    def forward(self, x,return_dist_inf=False,concat_feat=False,return_cls_dist_feat=False,ret_all_blocks=False):
+        x = self.forward_features(x,ret_all_blocks=ret_all_blocks)
         if self.head_dists is not None:
+            if ret_all_blocks:
+                x,x_dist=[self.head(t) for t in x[0]],[torch.stack([self.head_dists[i](t[:,i]) for i in range(self.num_dist_token)],dim=1) for t in x[1]]
+                return x,x_dist
             if concat_feat:
                 #concatenated only 1st token change
                 x, x_dist = self.concHead(torch.cat((x[0],x[1][:,0]),dim=1)), torch.stack([self.head_dists[i](x[1][:,i]) for i in range(self.num_dist_token)],dim=1)  # x must be a tuple
@@ -398,11 +412,9 @@ class MDVisionTransformer(nn.Module):
                 x, x_dist,cls_feat,dist_feat = self.head(x[0]), torch.stack([self.head_dists[i](x[1][:,i]) for i in range(self.num_dist_token)],dim=1),x[0],x[1]  # x must be a tuple
             if return_cls_dist_feat:
                 return x,x_dist,cls_feat,dist_feat
-            elif (self.training and not torch.jit.is_scripting()) or return_dist_inf:
-                # during inference, return the average of both classifier predictions
-                return x, x_dist
-            else:
-                return x  # Care this #inference
+
+            return x, x_dist
+          
         else:
             x = self.head(x)
         return x

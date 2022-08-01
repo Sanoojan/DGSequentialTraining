@@ -599,6 +599,8 @@ class ConvolutionalVisionTransformer(nn.Module):
         self.di_token = spec['DI_TOKEN'][-1]
         # Classifier head
         self.head = nn.Linear(dim_embed, num_classes) if num_classes > 0 else nn.Identity()
+
+        self.head_DI = nn.Linear(dim_embed, num_classes) if self.di_token else nn.Identity()
         trunc_normal_(self.head.weight, std=0.02)
 
     def init_weights(self, pretrained='', pretrained_layers=[], verbose=True):
@@ -692,7 +694,7 @@ class ConvolutionalVisionTransformer(nn.Module):
         x = [self.head(out) for out in outputs]
         # print(x.shape(name=None))
         if self.di_token :
-            return x[-1],outputs_di[-1]
+            return x[-1],self.head_DI(outputs_di[-1])
         return x[-1]
 
 @register_model
