@@ -480,6 +480,88 @@ class Deit_dist(Algorithm):
         out,out_dist= self.network(x)
         return out
 
+class Vit_untrained_teacher_distill_features(Algorithm):
+    """
+    Deit_dist; Order of domains in training should be preserved
+    """
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(Vit_untrained_teacher_distill_features,self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+       
+        self.num_domains=num_domains
+        self.Teachnetwork=return_backbone_network("DinoSmall",num_classes,self.hparams,add_di_token=False,distilled=False,num_dist_token=10)
+        network_deit=deit_small_patch16_224(pretrained=True) 
+        network_deit.head = nn.Linear(384, num_classes)
+        # network_deit.head_dist = nn.Linear(384, num_classes)  # reinitialize the last layer for distillation
+        attn_sep_mask=self.hparams["attn_sep_mask"]
+    
+        self.network=MDVisionTransformer(img_size=224,num_classes=num_classes, distilled=True,patch_size=16, embed_dim=384, depth=12, num_heads=6,num_dist_token=1,attn_sep_mask=attn_sep_mask)
+        self.network.load_state_dict(network_deit.state_dict(),strict=False) 
+
+        printNetworkParams(self.network)
+        self.optimizer = torch.optim.AdamW(  
+            self.network.parameters(),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.temp=self.hparams['temp']
+        self.Wd=self.hparams['Wd']
+        # All teacher model paths. Domains should be in order ACPS
+        # teachers_PACS=['domainbed/outputs/PACS/erm/56ca19b798087be4998b8b46ef3281f7/best_val_model_testdom_[0]_0.9709.pkl','domainbed/outputs/PACS/erm/10b4762ab54115af03884b99e5a136ed/best_val_model_testdom_[1]_0.9690.pkl','domainbed/outputs/PACS/erm/89d41edbd75abb12dcf9fd0bfc1061ed/best_val_model_testdom_[2]_0.9591.pkl','domainbed/outputs/PACS/erm/0d52a60924ea5be50a0ca63e1ad8d55e/best_val_model_testdom_[3]_0.9674.pkl']
+        # teachers_VLCS=['domainbed/pretrained/VLCS/ERM/f9a56b59075f90e98ba6a746f020b111/best_val_model_testdom_[0]_0.8095.pkl','domainbed/pretrained/VLCS/ERM/59f2cefdd9db539bfa26ec5116ddaaa9/best_val_model_testdom_[1]_0.8914.pkl','domainbed/pretrained/VLCS/ERM/74752172f616ce9b3066d289c8461f54/best_val_model_testdom_[2]_0.8754.pkl','domainbed/pretrained/VLCS/ERM/241e42e44bf8761f8b90b71f1c0b13c4/best_val_model_testdom_[3]_0.8567.pkl']
+        # teachers=teachers_VLCS
+        # print(teachers[queue_var.current_test_env[0]])
+        # self.Teachnetwork=load_model(teachers[queue_var.current_test_env[0]]).to("cuda") 
+        
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+
+
+        loss=0
+        pred,_,_,dtok_feat=self.predictTrain(all_x)
+        # pred_dist=torch.mean(pred_dist,1)
+        dtok_feat=torch.squeeze(dtok_feat,dim=1)
+        predTeacher=self.predictTeacher(self.Teachnetwork,all_x)
+        loss+= F.cross_entropy(pred,all_y)
+        t = self.temp
+        Wd=self.Wd
+
+
+        # changed for self distillation
+        # loss+= Wd* F.kl_div(
+        #     F.log_softmax(pred_dist / t, dim=1),
+        #     F.log_softmax(pred/t, dim=1),
+        #     reduction='sum',
+        #     log_target=True
+        # ) * (t * t) / pred_dist.numel()
+        # print(dtok_feat.shape)
+        # print(predTeacher.shape)
+        loss+= Wd* F.kl_div(
+            F.log_softmax(dtok_feat / t, dim=1),
+            F.log_softmax(predTeacher/t, dim=1),
+            reduction='sum',
+            log_target=True
+        ) * (t * t) / predTeacher.numel()
+
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return {'loss': loss.item()}
+
+       
+    def predictTrain(self, x):
+        return self.network(x,return_cls_dist_feat=True)
+    def predictTeacher(self,net, x):
+        return net(x)
+    def predict(self, x):
+        out,out_dist= self.network(x)
+        return out
+
 class Deit_dist_block(Algorithm):
     """
     Deit_dist; Order of domains in training should be preserved
@@ -845,7 +927,7 @@ class Vit_with_part_learning(Algorithm):
         bacground_labels=torch.full((5*self.num_domains,),self.num_classes-1).to("cuda")
         all_x=torch.cat([all_x,background])
         all_y=torch.cat([all_y,bacground_labels])
-        length=7
+        length=3
         patch_size=16
         tot_num_patches=14
         top_left=torch.randint(tot_num_patches-length+1,(2,))

@@ -228,8 +228,8 @@ class VisionTransformer(nn.Module):
         x = self.norm(x)
        
         if self.distilled:
-            return self.head(x[:, 0]),self.head_dist(x[:, -self.num_dist_token:])
-        return self.head(x[:, 0])
+            return self.head(x[:, 0]),self.head_dist(x[:, -self.num_dist_token:]) # head is not included if not distilled Handle
+        return x[:,0] 
 
     def get_last_selfattention(self, x):
         x = self.prepare_tokens(x)
