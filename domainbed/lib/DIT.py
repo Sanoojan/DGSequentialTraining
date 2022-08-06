@@ -320,6 +320,7 @@ class VisionTransformer(nn.Module):
 
         # Classifier head(s)
         self.head = nn.Linear(self.num_features, num_classes) if num_classes > 0 else nn.Identity()
+        self.head_DI=nn.Linear(self.num_features, num_classes) if num_classes > 0 else nn.Identity()
         self.head_dist = None
         if distilled:
             self.head_dist = nn.Linear(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity()
@@ -413,7 +414,7 @@ class VisionTransformer(nn.Module):
             elif(class_di_add):
                 x = self.head(x[0]+x[-1]),x[-1]
             else:
-                x = self.head(x[0]),x[-1]
+                x = self.head(x[0]),self.head_DI(x[-1]) #Self.head added 
         else:
             if self.head_dist is not None:
                 x, x_dist = self.head(x[0]), self.head_dist(x[1])  # x must be a tuple

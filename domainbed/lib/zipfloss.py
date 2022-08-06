@@ -45,16 +45,16 @@ def gen_pdf(logits, feats, labels, dense=True):
     mask=mask.scatter_( 1, tmp, torch.zeros_like(tmp).float())
     
     if dense:
+        # print(feats.shape)
         d_n, d_count = feats.shape
         assert n == d_n
-        feats = F.expand_dims(feats, axis=2).int()
-        logits = F.zeros((n,d_count,c)).int()
-        F.scatter(logits, 2, feats, F.ones_like(feats).int())
+        feats = torch.unsqueeze(feats, dim=2).type(torch.int64)
+        logits = torch.zeros((n,d_count,c)).int().to("cuda")
+        logits=logits.scatter_( 2, feats, torch.ones_like(feats).int().to("cuda"))
         logits = logits.sum(1)[:,:c]
    
     rank = rank_data(-logits)
-    # print(rank)
-    # print(mask)
+ 
     # zipf dist
     power = 1.0
     dist = (1 / rank) ** power

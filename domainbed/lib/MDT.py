@@ -30,6 +30,7 @@ from collections import OrderedDict
 from copy import deepcopy
 
 import itertools
+from re import A
 
 import torch
 import torch.nn as nn
@@ -327,7 +328,8 @@ class MDVisionTransformer(nn.Module):
 
         # Classifier head(s)
 
-        self.head = nn.Linear(self.num_features, num_classes) if num_classes > 0 else nn.Identity()  
+        self.head = nn.Linear(self.num_features, num_classes) if num_classes > 0 else nn.Identity() 
+        self.head_patch = nn.Linear(self.num_features, num_classes) if num_classes > 0 else nn.Identity()  
         self.concHead= nn.Linear(self.num_features*2, num_classes) if num_classes > 0 else nn.Identity()  #  for concatenatinated feat 
         self.head_dists = None
         if distilled:
@@ -376,7 +378,7 @@ class MDVisionTransformer(nn.Module):
         if self.num_tokens == 2:
             [nn.Linear(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity() for _ in range(self.num_dist_token)]
 
-    def forward_features(self, x,ret_all_blocks=False):
+    def forward_features(self, x,ret_all_blocks=False,all_token_logits=False):
         x = self.patch_embed(x)
         cls_token = self.cls_token.expand(x.shape[0], -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         if self.dist_tokens is None:
@@ -394,14 +396,23 @@ class MDVisionTransformer(nn.Module):
 
         # x = self.blocks(x)
         x = self.norm(x)
+
+        if all_token_logits:
+            return x   
         if self.dist_tokens is None:
             return self.pre_logits(x[:, 0])
         else:
             return x[:, 0], x[:, -self.num_dist_token:]
 
-    def forward(self, x,return_dist_inf=False,concat_feat=False,return_cls_dist_feat=False,ret_all_blocks=False):
-        x = self.forward_features(x,ret_all_blocks=ret_all_blocks)
+    def forward(self, x,return_dist_inf=False,concat_feat=False,return_cls_dist_feat=False,ret_all_blocks=False,all_token_logits=False):
+        x = self.forward_features(x,ret_all_blocks=ret_all_blocks,all_token_logits=all_token_logits)
+        
+            
         if self.head_dists is not None:
+            if all_token_logits:
+                x,x_patches,x_dist=x[:, 0],x[:,1:-self.num_dist_token], x[:, -self.num_dist_token:]
+                return self.head(x),self.head_patch(x_patches) ,torch.stack([self.head_dists[i](x_dist[:,i]) for i in range(self.num_dist_token)],dim=1)
+
             if ret_all_blocks:
                 x,x_dist=[self.head(t) for t in x[0]],[torch.stack([self.head_dists[i](t[:,i]) for i in range(self.num_dist_token)],dim=1) for t in x[1]]
                 return x,x_dist
@@ -416,6 +427,9 @@ class MDVisionTransformer(nn.Module):
             return x, x_dist
           
         else:
+            if all_token_logits:
+                x,x_patches=x[:, 0],x[:,1:]
+                return self.head(x),self.head(x_patches)
             x = self.head(x)
         return x
 
