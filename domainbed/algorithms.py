@@ -17,13 +17,13 @@ from domainbed.lib.MCT import MCVisionTransformer
 from domainbed.lib.MDT import MDVisionTransformer
 from domainbed.lib.DGT import DGVisionTransformer
 from domainbed.lib.cvt import tiny_cvt,small_cvt
-from domainbed.lib.t2t import t2t_vit_t_14,t2t_vit_7,t2t_vit_t_24
-from domainbed.lib.t2t_utils import load_for_transfer_learning
+# from domainbed.lib.t2t import t2t_vit_t_14,t2t_vit_7,t2t_vit_t_24
+# from domainbed.lib.t2t_utils import load_for_transfer_learning
 from domainbed.lib.DIT import VisionTransformer as dit
 from torch.nn.functional import interpolate
 import einops
 import domainbed.lib.Dino_vit as dino
-from domainbed.lib.zipfloss import zipf_loss
+from domainbed.lib.zipfloss import kl_loss, zipf_loss
 import itertools
 from prettytable import PrettyTable
 import copy
@@ -539,13 +539,18 @@ class Vit_untrained_teacher_distill_features(Algorithm):
         # ) * (t * t) / pred_dist.numel()
         # print(dtok_feat.shape)
         # print(predTeacher.shape)
-        loss+= Wd* F.kl_div(
-            F.log_softmax(dtok_feat / t, dim=1),
-            F.log_softmax(predTeacher/t, dim=1),
-            reduction='sum',
-            log_target=True
-        ) * (t * t) / predTeacher.numel()
 
+        # kl_loss=Wd*(F.kl_div(torch.clamp(dtok_feat, 1e-7, 1).log(),predTeacher.log(), reduction='batchmean',log_target=True))
+        
+
+        kl_loss= Wd* F.kl_div(
+            F.log_softmax(dtok_feat , dim=1),
+            F.log_softmax(predTeacher, dim=1),
+            reduction='batchmean',
+            log_target=True
+        ) 
+        print(kl_loss)
+        loss+=kl_loss
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -560,6 +565,95 @@ class Vit_untrained_teacher_distill_features(Algorithm):
         return net(x)
     def predict(self, x):
         out,out_dist= self.network(x)
+        return out
+
+class Vit_untrained_teacher_distill_attn(Algorithm):
+    """
+    Deit_dist; Order of domains in training should be preserved
+    """
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(Vit_untrained_teacher_distill_attn,self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+       
+        self.num_domains=num_domains
+        self.Teachnetwork=return_backbone_network("DinoSmall",num_classes,self.hparams,add_di_token=False,distilled=False,num_dist_token=10)
+        self.network = deit_small_patch16_224(pretrained=True)
+        self.network.head = nn.Linear(384, num_classes)
+        printNetworkParams(self.network)
+        self.optimizer = torch.optim.AdamW(  
+            self.network.parameters(),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.temp=self.hparams['temp']
+        self.Wd=self.hparams['Wd']
+        
+        
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+
+
+        loss=0
+        pred,all_attn=self.predictTrain(all_x)
+        last_attn=all_attn[-1]
+        last_attn_head0=last_attn[:,0,0,1:]
+        print(last_attn_head0.shape)
+        # last_attn_=last_attn[:,:,:]
+        Teacher_attention=self.predictTeacher(self.Teachnetwork,all_x)
+        Teacher_attention = Teacher_attention[:, :, 0, 1:]
+        Teacher_attention=torch.mean(Teacher_attention,dim=1)
+        loss+= F.cross_entropy(pred,all_y)
+        t = self.temp
+        Wd=self.Wd
+
+
+        # changed for self distillation
+        # loss+= Wd* F.kl_div(
+        #     F.log_softmax(pred_dist / t, dim=1),
+        #     F.log_softmax(pred/t, dim=1),
+        #     reduction='sum',
+        #     log_target=True
+        # ) * (t * t) / pred_dist.numel()
+        # print(dtok_feat.shape)
+        # print(predTeacher.shape)
+
+        # attn_loss=Wd*(F.kl_div(torch.clamp(F.softmax(last_attn_head0, dim=1), 1e-7, 1).log(),F.log_softmax(Teacher_attention, dim=1), reduction='batchmean'))
+        
+
+        attn_loss=kl_loss= Wd* F.kl_div(
+            F.log_softmax(last_attn_head0 , dim=1),
+            F.log_softmax(Teacher_attention, dim=1),
+            reduction='batchmean',
+            log_target=True
+        ) 
+
+        print(attn_loss)
+        loss+=attn_loss
+        # loss+= Wd* F.kl_div(
+        #     F.log_softmax(dtok_feat / t, dim=1),
+        #     F.log_softmax(predTeacher/t, dim=1),
+        #     reduction='sum',
+        #     log_target=True
+        # ) * (t * t) / predTeacher.numel()
+
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return {'loss': loss.item()}
+
+       
+    def predictTrain(self, x):
+        return self.network(x,return_attention=True)
+    def predictTeacher(self,net, x):
+        return net.get_last_selfattention(x)
+        
+    def predict(self, x):
+        out= self.network(x)
         return out
 
 class Deit_dist_block(Algorithm):
@@ -677,7 +771,12 @@ class Vit_dist_self_teacher(Algorithm):
         # All teacher model paths. Domains should be in order ACPS
         teachers_PACS=['domainbed/outputs/PACS/erm/56ca19b798087be4998b8b46ef3281f7/best_val_model_testdom_[0]_0.9709.pkl','domainbed/outputs/PACS/erm/10b4762ab54115af03884b99e5a136ed/best_val_model_testdom_[1]_0.9690.pkl','domainbed/outputs/PACS/erm/89d41edbd75abb12dcf9fd0bfc1061ed/best_val_model_testdom_[2]_0.9591.pkl','domainbed/outputs/PACS/erm/0d52a60924ea5be50a0ca63e1ad8d55e/best_val_model_testdom_[3]_0.9674.pkl']
         teachers_VLCS=['domainbed/pretrained/VLCS/ERM/f9a56b59075f90e98ba6a746f020b111/best_val_model_testdom_[0]_0.8095.pkl','domainbed/pretrained/VLCS/ERM/59f2cefdd9db539bfa26ec5116ddaaa9/best_val_model_testdom_[1]_0.8914.pkl','domainbed/pretrained/VLCS/ERM/74752172f616ce9b3066d289c8461f54/best_val_model_testdom_[2]_0.8754.pkl','domainbed/pretrained/VLCS/ERM/241e42e44bf8761f8b90b71f1c0b13c4/best_val_model_testdom_[3]_0.8567.pkl']
-        teachers=teachers_VLCS
+        #below is in cluster
+        teachers_OfficeHome=['domainbed/new_outputs/ERM/OfficeHome/b33477e9be6bef3c16b71d28471e95b2/best_val_model_testdom_[0]_0.8374.pkl','domainbed/new_outputs/ERM/OfficeHome/e8bd617010f3fce1a97164ab517f8d61/best_val_model_testdom_[1]_0.8248.pkl','domainbed/new_outputs/ERM/OfficeHome/70131225944c96a0697686f8441feef3/best_val_model_testdom_[2]_0.7817.pkl','domainbed/new_outputs/ERM/OfficeHome/75feeea74a86e5c489f80206f390bc9f/best_val_model_testdom_[3]_0.8129.pkl']
+        teachers_TerraIncognita=['domainbed/new_outputs/ERM/TerraIncognita/cd8c6937729e71972c5c830118da6e23/best_val_model_testdom_[0]_0.8952.pkl','domainbed/new_outputs/ERM/TerraIncognita/e9ceb2b0004f4b3762859963b0572cb6/best_val_model_testdom_[1]_0.9032.pkl','domainbed/new_outputs/ERM/TerraIncognita/1e0b2b72dc71e679249646ea44bef5f0/best_val_model_testdom_[2]_0.9084.pkl','domainbed/new_outputs/ERM/TerraIncognita/e239da6cb66555d359e575fac5f4951b/best_val_model_testdom_[3]_0.9221.pkl']
+        teachers_DomainNet=['domainbed/new_outputs/ERM/DomainNet/1a0e9071a204bff4c54128bb07ba07a0/best_val_model_testdom_[0]_0.5593.pkl','domainbed/new_outputs/ERM/DomainNet/9211d645d4c895631c553ce52aa87de9/best_val_model_testdom_[1]_0.6320.pkl','domainbed/new_outputs/ERM/DomainNet/d2ea915f855e3d5b5f1b5deef508c00a/best_val_model_testdom_[2]_0.5665.pkl','domainbed/new_outputs/ERM/DomainNet/4f3c2ed530541d05ca34252b0750245a/best_val_model_testdom_[3]_0.5879.pkl','domainbed/new_outputs/ERM/DomainNet/4d47926c474c0640ae26044435d67a2a/best_val_model_testdom_[4]_0.5510.pkl','domainbed/new_outputs/ERM/DomainNet/c0d4b937152a7017aa616a399f4e21e5/best_val_model_testdom_[5]_0.5703.pkl']
+        teachers=teachers_PACS
+        
         print(teachers[queue_var.current_test_env[0]])
         self.Teachnetwork=load_model(teachers[queue_var.current_test_env[0]]).to("cuda") 
         
@@ -959,12 +1058,14 @@ class Vit_with_part_learning(Algorithm):
         # changed for self distillation
         # loss+= Wd*zipf_loss(pred,pred,  all_y,feats=torch.argmax(pred_patches,dim=2).to("cuda") , loss_mask=False, dense=True)
 
-        loss+= Wd* F.kl_div(
+        kl_loss= Wd* F.kl_div(
             F.log_softmax(pred_sel / t, dim=1),
             F.log_softmax(pred_crop/t, dim=1),
             reduction='sum',
             log_target=True
         ) * (t * t) / pred_crop.numel()
+        print(kl_loss)
+        loss+=kl_loss
         self.cnt+=1
 
         self.optimizer.zero_grad()
