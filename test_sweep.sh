@@ -2,19 +2,48 @@
 # CUDA_VISIBLE_DEVICES=2,3 python -m domainbed.scripts.sweep launch --data_dir=/home/computervision1/DG_new_idea/domainbed/data --output_dir=./domainbed/outputs/ERM_Res50_pacs_Full_sweep --command_launcher multi_gpu_2_3 --algorithms ERM --single_test_envs --datasets PACS --n_hparams 5  --n_trials 3
 # for Wd in 0.05 0.2 0.5 1.5
 # do
+
 python -m domainbed.scripts.test_sweep launch\
     --data_dir=/share/data/drive_2/DG/data \
-    --output_dir=./domainbed/outputs/DI_tokening/Deit_seperate_DL_4_wei_lr/0.3 \
+    --output_dir=./domainbed/outputs_new/PACS/DI_tokening-vit-head/Deitsmall-sweep \
     --command_launcher multi_gpu\
-    --algorithms DI_tokening\
+    --algorithms DI_tokening_vit\
+    --backbone "DeitSmall" \
     --single_test_envs \
     --test_robustness False\
-    --accuracy False\
-    --tsne True\
+    --accuracy True\
+    --tsneOut_dir=./domainbed/tsneOuts/DIT_deit_small_cls_test_all \
     --datasets PACS \
-    --n_hparams 1  \
+    --n_hparams 10  \
     --n_trials 3 \
-    --hparams """{\"Wd\":0.3,\"attn_sep_mask\":1,\"num_class_select\":4,\"weight_decay\":0.01,\"lr\":0.00002}""" 
+    --hparams """{\"attn_sep_mask\":1,\"num_class_select\":4,\"batch_size\":32}""" 
+
+
+# for trials in 0 1 2
+# do
+#     for pretr in  ViT_RB_small
+#     do
+#     for tr_dom in 0 1 2 3
+#     do
+#         CUDA_VISIBLE_DEVICES=3 python -m domainbed.scripts.test_pretrained_models \
+#             --algorithm Testing\
+#             --pretrained "/home/computervision1/DG_new_idea/domainbed/Accross_Datasets/PACS/$pretr/test_env${tr_dom}_tr${trials}/IID_best.pkl"\
+#             --pretrained_comp "/home/computervision1/DG_new_idea/domainbed/Accross_Datasets/PACS/DeiT_small/test_env${tr_dom}_tr${trials}/IID_best.pkl"\
+#             --data_dir /home/computervision1/DG_new_idea/domainbed/data \
+#             --dataset PACS\
+#             --holdout_fraction 0.2\
+#             --hparams_seed 0 \
+#             --output_dir ./TSNE/PACS/${pretr}/${tr_dom}\
+#             --seed 0\
+#             --features True\
+#             --task domain_generalization \
+#             --test_envs $tr_dom \
+#             --trial_seed ${trials}\
+#             --algo_name "$pretr"\
+
+#     done
+#     done
+# done
 
 # for Wd in 2.0 3.0 5.0 10
 #    do
