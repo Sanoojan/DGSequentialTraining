@@ -47,3 +47,5 @@ domainbed/Outputs_old/
 
 domainbed/new_outputs/
 domainbed/outputs-new/
+Sweep_single_train.sh
+domainbed/outputs_distill/
