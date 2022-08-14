@@ -23,6 +23,7 @@ from domainbed.lib.DIT import VisionTransformer as dit
 from torch.nn.functional import interpolate
 import einops
 import domainbed.lib.Dino_vit as dino
+import domainbed.lib.clip.clip as clip
 from domainbed.lib.zipfloss import kl_loss, zipf_loss
 import itertools
 from prettytable import PrettyTable
@@ -490,9 +491,11 @@ class Vit_untrained_teacher_distill_features(Algorithm):
                                   hparams)
        
         self.num_domains=num_domains
-        self.Teachnetwork=return_backbone_network("DinoSmall",num_classes,self.hparams,add_di_token=False,distilled=False,num_dist_token=10)
+        self.Teachnetwork=return_backbone_network("clip",num_classes,self.hparams,add_di_token=False,distilled=False,num_dist_token=0)
+        self.Teachnetwork.proj=None
         network_deit=deit_small_patch16_224(pretrained=True) 
         network_deit.head = nn.Linear(384, num_classes)
+        self.lin_proj=nn.Linear(384,768).to("cuda")
         # network_deit.head_dist = nn.Linear(384, num_classes)  # reinitialize the last layer for distillation
         attn_sep_mask=self.hparams["attn_sep_mask"]
     
@@ -501,7 +504,7 @@ class Vit_untrained_teacher_distill_features(Algorithm):
 
         printNetworkParams(self.network)
         self.optimizer = torch.optim.AdamW(  
-            self.network.parameters(),
+            list(self.network.parameters()) + list(self.lin_proj.parameters()),
             lr=self.hparams["lr"],
             weight_decay=self.hparams['weight_decay']
         )
@@ -524,7 +527,9 @@ class Vit_untrained_teacher_distill_features(Algorithm):
         pred,_,_,dtok_feat=self.predictTrain(all_x)
         # pred_dist=torch.mean(pred_dist,1)
         dtok_feat=torch.squeeze(dtok_feat,dim=1)
+        dtok_feat=self.lin_proj(dtok_feat)
         predTeacher=self.predictTeacher(self.Teachnetwork,all_x)
+        # print(predTeacher.shape)
         loss+= F.cross_entropy(pred,all_y)
         t = self.temp
         Wd=self.Wd
@@ -544,12 +549,113 @@ class Vit_untrained_teacher_distill_features(Algorithm):
         
 
         kl_loss= Wd* F.kl_div(
-            F.log_softmax(dtok_feat , dim=1),
-            F.log_softmax(predTeacher, dim=1),
+            F.log_softmax(dtok_feat/t , dim=1),
+            F.log_softmax(predTeacher/t, dim=1),
             reduction='batchmean',
             log_target=True
         ) 
-        print(kl_loss)
+        # print(kl_loss)
+        loss+=kl_loss
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return {'loss': loss.item()}
+
+       
+    def predictTrain(self, x):
+        return self.network(x,return_cls_dist_feat=True)
+    def predictTeacher(self,net, x):
+        return net(x)
+    def predict(self, x):
+        out,out_dist= self.network(x)
+        return out
+
+class clip_distill_features_with_text(Algorithm):
+    """
+    Deit_dist; Order of domains in training should be preserved
+    """
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(clip_distill_features_with_text,self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+       
+        self.num_domains=num_domains
+        self.Teachnetwork=return_backbone_network("clip_full",num_classes,self.hparams,add_di_token=False,distilled=False,num_dist_token=0)
+        # self.Teachnetwork.proj=None
+        network_deit=deit_small_patch16_224(pretrained=True) 
+        network_deit.head = nn.Linear(384, num_classes)
+        self.lin_proj=nn.Linear(384,1024).to("cuda")
+        # network_deit.head_dist = nn.Linear(384, num_classes)  # reinitialize the last layer for distillation
+        attn_sep_mask=self.hparams["attn_sep_mask"]
+    
+        self.network=MDVisionTransformer(img_size=224,num_classes=num_classes, distilled=True,patch_size=16, embed_dim=384, depth=12, num_heads=6,num_dist_token=1,attn_sep_mask=attn_sep_mask)
+        self.network.load_state_dict(network_deit.state_dict(),strict=False) 
+
+        printNetworkParams(self.network)
+        self.optimizer = torch.optim.AdamW(  
+            list(self.network.parameters()) + list(self.lin_proj.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.temp=self.hparams['temp']
+        self.Wd=self.hparams['Wd']
+        # All teacher model paths. Domains should be in order ACPS
+        # teachers_PACS=['domainbed/outputs/PACS/erm/56ca19b798087be4998b8b46ef3281f7/best_val_model_testdom_[0]_0.9709.pkl','domainbed/outputs/PACS/erm/10b4762ab54115af03884b99e5a136ed/best_val_model_testdom_[1]_0.9690.pkl','domainbed/outputs/PACS/erm/89d41edbd75abb12dcf9fd0bfc1061ed/best_val_model_testdom_[2]_0.9591.pkl','domainbed/outputs/PACS/erm/0d52a60924ea5be50a0ca63e1ad8d55e/best_val_model_testdom_[3]_0.9674.pkl']
+        # teachers_VLCS=['domainbed/pretrained/VLCS/ERM/f9a56b59075f90e98ba6a746f020b111/best_val_model_testdom_[0]_0.8095.pkl','domainbed/pretrained/VLCS/ERM/59f2cefdd9db539bfa26ec5116ddaaa9/best_val_model_testdom_[1]_0.8914.pkl','domainbed/pretrained/VLCS/ERM/74752172f616ce9b3066d289c8461f54/best_val_model_testdom_[2]_0.8754.pkl','domainbed/pretrained/VLCS/ERM/241e42e44bf8761f8b90b71f1c0b13c4/best_val_model_testdom_[3]_0.8567.pkl']
+        # teachers=teachers_VLCS
+        # print(teachers[queue_var.current_test_env[0]])
+        # self.Teachnetwork=load_model(teachers[queue_var.current_test_env[0]]).to("cuda") 
+        
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+
+
+        loss=0
+        pred,_,_,dtok_feat=self.predictTrain(all_x)
+        # pred_dist=torch.mean(pred_dist,1)
+        dtok_feat=torch.squeeze(dtok_feat,dim=1)
+        dtok_feat=self.lin_proj(dtok_feat)
+        PACS_classes=["dog","elephant","giraffe","guitar","horse","house","person"]
+        # text_inputs_text = [(f"a photo of a {PACS_classes[c]}") for c in all_y]
+        text_inputs = torch.cat([clip.tokenize(f"a photo of a {PACS_classes[c]}") for c in all_y]).to("cuda")
+        visual_features=self.Teachnetwork.encode_image(all_x)
+        Textual_features=self.Teachnetwork.encode_text(text_inputs)
+        visual_features = visual_features / visual_features.norm(dim=1, keepdim=True)
+        Textual_features = Textual_features / Textual_features.norm(dim=1, keepdim=True)
+        conc_feat=torch.cat([visual_features,Textual_features],dim=-1)
+   
+     
+        # predTeacher=self.predictTeacher(self.Teachnetwork,all_x)
+        # print(predTeacher.shape)
+        loss+= F.cross_entropy(pred,all_y)
+        t = self.temp
+        Wd=self.Wd
+
+
+        # changed for self distillation
+        # loss+= Wd* F.kl_div(
+        #     F.log_softmax(pred_dist / t, dim=1),
+        #     F.log_softmax(pred/t, dim=1),
+        #     reduction='sum',
+        #     log_target=True
+        # ) * (t * t) / pred_dist.numel()
+        # print(dtok_feat.shape)
+        # print(predTeacher.shape)
+
+        # kl_loss=Wd*(F.kl_div(torch.clamp(dtok_feat, 1e-7, 1).log(),predTeacher.log(), reduction='batchmean',log_target=True))
+        
+
+        kl_loss= Wd* F.kl_div(
+            F.log_softmax(dtok_feat/t , dim=1),
+            F.log_softmax(conc_feat/t, dim=1),
+            reduction='batchmean',
+            log_target=True
+        ) 
+        # print(kl_loss)
         loss+=kl_loss
 
         self.optimizer.zero_grad()
@@ -586,7 +692,7 @@ class Vit_untrained_teacher_distill_attn(Algorithm):
             lr=self.hparams["lr"],
             weight_decay=self.hparams['weight_decay']
         )
-        self.temp=self.hparams['temp']
+        # self.temp=self.hparams['temp']
         self.Wd=self.hparams['Wd']
         
         
@@ -600,13 +706,13 @@ class Vit_untrained_teacher_distill_attn(Algorithm):
         pred,all_attn=self.predictTrain(all_x)
         last_attn=all_attn[-1]
         last_attn_head0=last_attn[:,0,0,1:]
-        print(last_attn_head0.shape)
+        # print(last_attn_head0.shape)
         # last_attn_=last_attn[:,:,:]
         Teacher_attention=self.predictTeacher(self.Teachnetwork,all_x)
         Teacher_attention = Teacher_attention[:, :, 0, 1:]
         Teacher_attention=torch.mean(Teacher_attention,dim=1)
         loss+= F.cross_entropy(pred,all_y)
-        t = self.temp
+        # t = self.temp
         Wd=self.Wd
 
 
@@ -623,14 +729,14 @@ class Vit_untrained_teacher_distill_attn(Algorithm):
         # attn_loss=Wd*(F.kl_div(torch.clamp(F.softmax(last_attn_head0, dim=1), 1e-7, 1).log(),F.log_softmax(Teacher_attention, dim=1), reduction='batchmean'))
         
 
-        attn_loss=kl_loss= Wd* F.kl_div(
+        attn_loss= Wd* F.kl_div(
             F.log_softmax(last_attn_head0 , dim=1),
             F.log_softmax(Teacher_attention, dim=1),
             reduction='batchmean',
             log_target=True
         ) 
 
-        print(attn_loss)
+        # print(attn_loss)
         loss+=attn_loss
         # loss+= Wd* F.kl_div(
         #     F.log_softmax(dtok_feat / t, dim=1),
@@ -1569,6 +1675,7 @@ class ERM_ViT(Algorithm):
                                   hparams)
        
         self.num_domains=num_domains
+        #for clip changed
         self.network=return_backbone_network(backbone,num_classes,self.hparams,add_di_token=False)
         # self.network.head()
         self.optimizer = torch.optim.AdamW(
@@ -1584,18 +1691,19 @@ class ERM_ViT(Algorithm):
 
         all_x = torch.cat([x for x,y in minibatches])
         all_y = torch.cat([y for x,y in minibatches])
-        n=self.num_class_select
-        d=self.num_domains
-        all_y=einops.rearrange(all_y,'(n d s)->(d s n)',n=n ,d=d)
-        all_x=einops.rearrange(all_x,'(n d s) C H W->(d s n) C H W ',n=n ,d=d)
-
-        
+        # n=self.num_class_select
+        # d=self.num_domains
+        # all_y=einops.rearrange(all_y,'(n d s)->(d s n)',n=n ,d=d)
+        # all_x=einops.rearrange(all_x,'(n d s) C H W->(d s n) C H W ',n=n ,d=d)
+      
         batch_images = make_grid(all_x, nrow=7, normalize=True)
         if(self.cnt==0):
             save_image(batch_images, "./domainbed/batchimg.png",normalize=False)
         loss=0
         pred=self.predictTrain(all_x)
+
         loss+= F.cross_entropy(pred,all_y)
+
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -2950,14 +3058,21 @@ def UpdateClsTrainQueues(minibatches):
 
 def load_dino(model_name,num_classes=0,distilled=False,num_dist_token=0):
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    if(model_name=="DinoSmall"):
     # build model
-    model = dino.__dict__['vit_small'](patch_size=16, num_classes=num_classes,distilled=distilled,num_dist_token=num_dist_token)
-    # for p in model.parameters():
-    #     p.requires_grad = False
-    # model.eval()
-    model.to(device)
-    pretrained_weights="domainbed/pretrained/dino/dino_deitsmall16_pretrain.pth"
-
+        model = dino.__dict__['vit_small'](patch_size=16, num_classes=num_classes,distilled=distilled,num_dist_token=num_dist_token)
+        # for p in model.parameters():
+        #     p.requires_grad = False
+        # model.eval()
+        model.to(device)
+        pretrained_weights="domainbed/pretrained/dino/dino_deitsmall16_pretrain.pth"
+    elif(model_name=="DinoSmall"):
+        model = dino.__dict__['vit_base'](patch_size=16, num_classes=num_classes,distilled=distilled,num_dist_token=num_dist_token)
+        # for p in model.parameters():
+        #     p.requires_grad = False
+        # model.eval()
+        model.to(device)
+        pretrained_weights="domainbed/pretrained/dino/dino_deitbase16_pretrain.pth"
     state_dict = torch.load(pretrained_weights, map_location="cpu")
     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     # remove `backbone.` prefix induced by multicrop wrapper
@@ -3185,6 +3300,28 @@ def return_backbone_network(network_name,num_classes,hparams,add_di_token=False,
     elif(network_name=="DinoSmall"):
         network=load_dino(network_name,num_classes,distilled=distilled,num_dist_token=num_dist_token)
         printNetworkParams(network)
+        return network
+    elif(network_name=="clip"):
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model, preprocess = clip.load('ViT-B/16', device)
+        model=model.float()
+        network=model.visual
+        network.proj=nn.Parameter(0.03608439182435161 * torch.randn(768, num_classes))
+        # network.proj=None
+        # classifier=nn.Linear(768, num_classes)
+        
+        return network
+    elif(network_name=="clip_full"):
+        #change
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model, preprocess = clip.load('ViT-B/16', device)
+        model=model.float()
+        network=model
+        
+        # network.proj=nn.Parameter(0.03608439182435161 * torch.randn(768, num_classes))
+        # network.proj=None
+        # classifier=nn.Linear(768, num_classes)
+        
         return network
     
     
