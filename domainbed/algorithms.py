@@ -404,6 +404,98 @@ class ERM_clip_text_conc(Algorithm):
         outs=self.classifier(conc_feat)
         return outs
 
+class ERM_clip_cross_attn(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_clip_cross_attn, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
+        if(self.hparams['weight_init']=="clip_full"):
+            print("clip_full")
+            # self.featurizer.network.proj=None
+        else:
+            self.featurizer.network.head=nn.Identity()
+        self.classifier = networks.Classifier(
+            1280,
+            num_classes,
+            self.hparams['nonlinear_classifier'],init=self.hparams['weight_init'])
+        # self.network = nn.Sequential(self.featurizer, self.classifier)
+        printNetworkParams(self.featurizer)
+        self.optimizer = torch.optim.AdamW(
+            list(self.featurizer.parameters())+list(self.classifier.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.Class_names=misc.Class_names
+        # print(self.Class_names)
+        self.cnt=0
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        # with torch.no_grad():
+        text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in all_y]).to("cuda")
+        image_features = self.featurizer.encode_image(all_x)
+        text_features = self.featurizer.encode_text(text_inputs)
+        
+
+        # image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        # text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        conc_feat=torch.cat([image_features,text_features],dim=1)
+        loss=F.cross_entropy(self.classifier(conc_feat), all_y)
+        
+        # print(conc_feat.shape)
+        # if(self.cnt<2500):
+        #     with torch.no_grad():
+        #         feat=self.featurizer(all_x)
+        #     loss=F.cross_entropy(self.classifier(feat), all_y)
+        # else:
+        #     loss = F.cross_entropy(self.predict(all_x), all_y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        text_inputs = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+        
+        image_features = self.featurizer_orig.encode_image(x)
+        text_features = self.featurizer_orig.encode_text(text_inputs)
+        # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
+        image_features = image_features @ self.featurizer_orig.visual.proj
+
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+
+
+        # cosine similarity as logits
+        logit_scale = self.featurizer_orig.logit_scale.exp()
+        
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        prob=F.softmax(logits_per_image,dim=1)
+        prob=torch.max(prob,dim=1)
+        vals=prob.values.unsqueeze(1)
+        indices=prob.indices
+        text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in indices]).to("cuda")
+        image_features = self.featurizer.encode_image(x)
+        text_features = self.featurizer.encode_text(text_inputs)
+        text_features=vals*text_features
+        # image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        # text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        conc_feat=torch.cat([image_features,text_features],dim=1)
+        outs=self.classifier(conc_feat)
+        return outs
+
+
+
+
 class ERM_clip_weighted_text_conc(Algorithm):
     """
     Empirical Risk Minimization (ERM)

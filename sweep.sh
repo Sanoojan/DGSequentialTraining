@@ -54,7 +54,7 @@ do
         for command in delete_incomplete launch
         do
             python -m domainbed.scripts.sweep $command\
-                --data_dir=/nfs/users/ext_maryam.sultana/DG_new_idea/domainbed/data \
+                --data_dir=/nfs/users/ext_sanoojan.baliah/Sanoojan/DG/data \
                 --output_dir=./domainbed/outputs_new/ERM_clip_WTC_DPL_no_conf/${dataset}/lr-${lr}\
                 --command_launcher multi_gpu\
                 --algorithms ERM_clip_WTC_DPL_no_conf \
