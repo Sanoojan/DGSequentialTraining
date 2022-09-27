@@ -21,3 +21,6 @@ domainbed/Outputs_old/
 domainbed/outputs_new/
 domainbed/new_outputs/
 domainbed/outputs_distill/
+domainbed/pretrained/
+domainbed/tsneOuts/
+img_outs/
