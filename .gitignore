@@ -14,3 +14,6 @@ domainbed/pretrained/dino/dino_vitbase16_pretrain.pth
 domainbed/lib/clip/*
 domainbed/lib/clip/bpe_simple_vocab_16e6.txt.gz
 sweep.sh
+data_small/*
+
+data_small/PACS/
