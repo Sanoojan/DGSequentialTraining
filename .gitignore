@@ -4,3 +4,12 @@ domainbed/facebook.py
 domainbed/data/*
 train_output/*
 domainbed/outputs/
+Outs/
+sweep.sh
+slurm*
+*.sh
+
+domainbed/outputs_new/
+domainbed/pretrained/dino/dino_vitbase16_pretrain.pth
+domainbed/lib/clip/*
+domainbed/lib/clip/bpe_simple_vocab_16e6.txt.gz
