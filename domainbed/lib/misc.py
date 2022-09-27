@@ -154,7 +154,7 @@ def random_pairs_of_minibatches(minibatches):
 
     return pairs
 
-def accuracy(network, loader, weights, device,noise_sd=0.5,addnoise=False):
+def accuracy(network, loader, weights, device,noise_sd=0.5,addnoise=False,env=None):
     correct = 0
     total = 0
     weights_offset = 0

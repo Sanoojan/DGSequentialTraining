@@ -214,6 +214,7 @@ class VisionTransformer(nn.Module):
         scale = width ** -0.5
         self.class_embedding = nn.Parameter(scale * torch.randn(width))
         self.positional_embedding = nn.Parameter(scale * torch.randn((input_resolution // patch_size) ** 2 + 1, width))
+        self.positional_embedding2 = nn.Parameter(scale * torch.randn( 1, width))
         self.ln_pre = LayerNorm(width)
 
         self.transformer = Transformer(width, layers, heads)
@@ -222,12 +223,21 @@ class VisionTransformer(nn.Module):
         self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
        
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor,text_feat=None):
         x = self.conv1(x)  # shape = [*, width, grid, grid]
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
         x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
-        x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)  # shape = [*, grid ** 2 + 1, width]
-        x = x + self.positional_embedding.to(x.dtype)
+        # print(x.shape)
+        if text_feat is None:
+            x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)  # shape = [*, grid ** 2 + 1, width]
+            x = x + self.positional_embedding.to(x.dtype)
+        else:
+            if(len(text_feat.shape)==2):
+                text_feat=torch.unsqueeze(text_feat,dim=1)
+            x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x,text_feat], dim=1)  # shape = [*, grid ** 2 + 1, width]
+            # x = x + self.positional_embedding.to(x.dtype)
+            # x=torch.cat([x,text_feat],dim=1)
+            x = x + torch.cat([self.positional_embedding.to(x.dtype),self.positional_embedding2.to(x.dtype)],dim=0)
         x = self.ln_pre(x)
 
         x = x.permute(1, 0, 2)  # NLD -> LND
@@ -235,8 +245,8 @@ class VisionTransformer(nn.Module):
         x = x.permute(1, 0, 2)  # LND -> NLD
 
         x = self.ln_post(x[:, 0, :])
-        if self.proj is not None:
-            x = x @ self.proj
+        # if self.proj is not None:
+        #     x = x @ self.proj
 
         return x
 
@@ -338,8 +348,8 @@ class CLIP(nn.Module):
     def dtype(self):
         return self.visual.conv1.weight.dtype
 
-    def encode_image(self, image):
-        return self.visual(image.type(self.dtype))
+    def encode_image(self, image,text_feat=None):
+        return self.visual(image.type(self.dtype),text_feat=text_feat)
 
     def encode_text(self, text):
         x = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
@@ -352,6 +362,7 @@ class CLIP(nn.Module):
 
         # x.shape = [batch_size, n_ctx, transformer.width]
         # take features from the eot embedding (eot_token is the highest number in each sequence)
+
         x = x[torch.arange(x.shape[0]), text.argmax(dim=-1)] @ self.text_projection
 
         return x
@@ -366,7 +377,9 @@ class CLIP(nn.Module):
 
         # cosine similarity as logits
         logit_scale = self.logit_scale.exp()
+
         logits_per_image = logit_scale * image_features @ text_features.t()
+   
         logits_per_text = logits_per_image.t()
 
         # shape = [global_batch_size, global_batch_size]
@@ -433,5 +446,5 @@ def build_model(state_dict: dict):
             del state_dict[key]
 
     convert_weights(model)
-    model.load_state_dict(state_dict)
+    model.load_state_dict(state_dict,strict=False)
     return model.eval()

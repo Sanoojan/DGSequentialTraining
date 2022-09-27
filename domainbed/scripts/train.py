@@ -54,6 +54,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_model_every_checkpoint', action='store_true')
     parser.add_argument('--save_best_model', action='store_true')
     parser.add_argument('--backbone', type=str, default="DeitSmall")
+    parser.add_argument('--zero_shot',action='store_true')
     args = parser.parse_args()
     args.save_best_model=True
     # If we ever want to implement checkpointing, just persist these values
@@ -96,6 +97,8 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+    args.zero_shot=False # True for zero shot analysis
+
     if torch.cuda.is_available():
         device = "cuda"
     else:
@@ -104,6 +107,9 @@ if __name__ == "__main__":
     if args.dataset in vars(datasets):
         dataset = vars(datasets)[args.dataset](args.data_dir,
             args.test_envs, hparams)
+        queue_var.Class_names=dataset.Class_names
+        queue_var.environments=dataset.environments
+        # print(queue_var.Class_names)
     else:
         raise NotImplementedError
 
@@ -308,6 +314,84 @@ if __name__ == "__main__":
     last_results_keys = None
     start_time=time.time()
     best_val_acc=0
+    if (args.zero_shot):
+        step_start_time = time.time()
+        minibatches_device = [(x.to(device), y.to(device))
+            for x,y in next(train_minibatches_iterator)]
+        if args.task == "domain_adaptation":
+            uda_device = [x.to(device)
+                for x,_ in next(uda_minibatches_iterator)]
+        else:
+            uda_device = None
+        # step_vals = algorithm.update(minibatches_device, uda_device)
+        checkpoint_vals['step_time'].append(time.time() - step_start_time)
+
+        # for key, val in step_vals.items():
+        #     checkpoint_vals[key].append(val)
+        step=0
+        if (step % checkpoint_freq == 0) or (step == n_steps - 1):
+            results = {
+                'step': step,
+                'epoch': step / steps_per_epoch,
+            }
+
+            for key, val in checkpoint_vals.items():
+                results[key] = np.mean(val)
+
+            evals = zip(eval_loader_names, eval_loaders, eval_weights)
+            temp_acc=0
+            temp_count=0
+            for name, loader, weights in evals:
+
+                acc = misc.accuracy(algorithm, loader, weights, device,env=int(name[3]))
+                if(args.save_best_model):
+                    if (int(name[3]) not in args.test_envs and  "out" in name):
+                        curr_train_env=name[3]
+                        temp_acc+=acc
+                        temp_count+=1
+                
+                results[name+'_acc'] = acc
+            
+            results['mem_gb'] = torch.cuda.max_memory_allocated() / (1024.*1024.*1024.)
+
+            results_keys = sorted(results.keys())
+            if results_keys != last_results_keys:
+                misc.print_row(results_keys, colwidth=12)
+                last_results_keys = results_keys
+            misc.print_row([results[key] for key in results_keys],
+                colwidth=12)
+
+            if(args.save_best_model):
+                val_acc=temp_acc/(temp_count*1.0)   
+                if(val_acc>=best_val_acc):
+                    model_save=copy.deepcopy(algorithm)  #clone
+                    best_val_acc=val_acc
+                    savename= 'best_val_model_testdom_'+str(args.test_envs)+"_{:.4f}".format(val_acc)+'.pkl'
+                    print("Best model upto now")
+                    
+            results.update({
+                'hparams': hparams,
+                'args': vars(args)
+            })
+
+            epochs_path = os.path.join(args.output_dir, 'results.jsonl')
+            with open(epochs_path, 'a') as f:
+                f.write(json.dumps(results, sort_keys=True) + "\n")
+
+            algorithm_dict = algorithm.state_dict()
+            start_step = step + 1
+            checkpoint_vals = collections.defaultdict(lambda: [])
+
+            if args.save_model_every_checkpoint:
+                save_checkpoint(f'model_step{step}.pkl')
+            stop_time=time.time()
+            print("Time taken to train: ",str((stop_time-start_time)/60.0)," minutes")
+            if(args.save_best_model):
+                save_checkpoint_best(savename,model_save)
+            with open(os.path.join(args.output_dir, 'done'), 'w') as f:
+                f.write('done')
+            exit()
+            
     for step in range(start_step, n_steps):
         step_start_time = time.time()
         minibatches_device = [(x.to(device), y.to(device))
@@ -337,7 +421,7 @@ if __name__ == "__main__":
             temp_count=0
             for name, loader, weights in evals:
 
-                acc = misc.accuracy(algorithm, loader, weights, device)
+                acc = misc.accuracy(algorithm, loader, weights, device,env=int(name[3]))
                 if(args.save_best_model):
                     if (int(name[3]) not in args.test_envs and  "out" in name):
                         curr_train_env=name[3]
