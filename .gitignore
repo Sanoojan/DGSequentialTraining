@@ -19,3 +19,5 @@ data_small/*
 data_small/PACS/
 domainbed/Outputs_old/
 domainbed/outputs_new/
+domainbed/new_outputs/
+domainbed/outputs_distill/
