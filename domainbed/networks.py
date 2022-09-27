@@ -9,6 +9,9 @@ from domainbed.lib import wide_resnet
 import copy
 from domainbed.lib.visiontransformer import *
 from domainbed.lib.cvt import small_cvt
+import domainbed.lib.clip.clip as clip
+import domainbed.lib.Dino_vit as dino
+# from domainbed.lib.CvT import CvT
 
 def remove_batch_norm_from_resnet(model):
     fuse = torch.nn.utils.fusion.fuse_conv_bn_eval
@@ -172,8 +175,43 @@ class ViT(torch.nn.Module):
             elif hparams['backbone']=="CVTSmall":
                 self.network = small_cvt(pretrained=True)
                 self.network.head = nn.Linear(384, num_classes)
+            elif hparams['backbone']=="DeitBase":
+                self.network = deit_base_patch16_224(pretrained=True)
+                self.network.head = nn.Linear(768, num_classes)
             else:
                 raise NotImplementedError
+        elif hparams['weight_init']=="Dino":
+            if hparams['backbone']=="DeitSmall":
+                self.network = load_dino("DinoSmall",num_classes=num_classes)
+                # self.network.head = nn.Linear(384, num_classes)
+            elif hparams['backbone']=="DeitBase":
+                self.network = load_dino("DinoBase",num_classes=num_classes)
+                # self.network.head = nn.Linear(768, num_classes)
+            else:
+                raise NotImplementedError
+        elif hparams['weight_init']=="clip":
+            if hparams['backbone']=="DeitBase":
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                model, preprocess = clip.load('ViT-B/16', device)
+                # model=model.float()
+                self.network=model.visual.float()
+                
+                self.network.proj=nn.Parameter(0.03608439182435161 * torch.randn(768, num_classes))
+                # self.network.proj==None
+            else:
+                raise NotImplementedError       
+        elif hparams['weight_init']=="clip_full":
+            if hparams['backbone']=="DeitBase":
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                model, preprocess = clip.load('ViT-B/16', device)
+                # model=model.float()
+                self.network=model.float()
+                
+                # self.network.proj=nn.Parameter(0.03608439182435161 * torch.randn(768, num_classes))
+                # self.network.proj==None
+            else:
+                raise NotImplementedError      
+        
         elif hparams['weight_init']=="Random":
             if hparams['backbone']=="DeitSmall":
                 self.network = deit_small_patch16_224(pretrained=False)
@@ -181,6 +219,9 @@ class ViT(torch.nn.Module):
             elif hparams['backbone']=="CVTSmall":
                 self.network = small_cvt(pretrained=False)
                 self.network.head = nn.Linear(384, num_classes)
+            elif hparams['backbone']=="DeitBase":
+                self.network = deit_base_patch16_224(pretrained=False)
+                self.network.head = nn.Linear(768, num_classes)
             else:
                 raise NotImplementedError
         elif hparams['weight_init']=="xavier_uniform":
@@ -200,7 +241,8 @@ class ViT(torch.nn.Module):
 
     def forward(self, x):
         """Encode x into a feature vector of size n_outputs."""
-        return self.dropout(self.network(x))
+        # return self.dropout(self.network(x))
+        return self.network(x)
 
     def train(self, mode=True):
         """
@@ -332,3 +374,28 @@ class WholeFish(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+
+def load_dino(model_name,num_classes=0,distilled=False,num_dist_token=0):
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    if(model_name=="DinoSmall"):
+    # build model
+        model = dino.__dict__['vit_small'](patch_size=16, num_classes=num_classes,distilled=distilled,num_dist_token=num_dist_token)
+        # for p in model.parameters():
+        #     p.requires_grad = False
+        # model.eval()
+        model.to(device)
+        pretrained_weights="domainbed/pretrained/dino/dino_deitsmall16_pretrain.pth"
+    elif(model_name=="DinoBase"):
+        model = dino.__dict__['vit_base'](patch_size=16, num_classes=num_classes,distilled=distilled,num_dist_token=num_dist_token)
+        # for p in model.parameters():
+        #     p.requires_grad = False
+        # model.eval()
+        model.to(device)
+        pretrained_weights="domainbed/pretrained/dino/dino_vitbase16_pretrain.pth"
+    state_dict = torch.load(pretrained_weights, map_location="cpu")
+    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+    # remove `backbone.` prefix induced by multicrop wrapper
+    state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
+    msg = model.load_state_dict(state_dict, strict=False)
+    print('Pretrained weights found at {} and loaded with msg: {}'.format(pretrained_weights, msg))
+    return model

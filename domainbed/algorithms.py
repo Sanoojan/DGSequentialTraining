@@ -1,5 +1,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 
+from unittest.mock import patch
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,6 +9,8 @@ from torch.autograd import Variable
 from torchvision import transforms
 import copy
 import numpy as np
+import itertools
+import domainbed.lib.clip.clip as clip
 from collections import defaultdict, OrderedDict
 try:
     from backpack import backpack, extend
@@ -16,7 +19,9 @@ except:
     backpack = None
 
 from domainbed import networks
-
+from domainbed.lib.clip.clip import tokenize
+from domainbed import global_var
+from domainbed.lib import misc
 from domainbed.lib.misc import (
     random_pairs_of_minibatches, ParamDict, MovingAverage, l2_between_dicts
 )
@@ -101,6 +106,8 @@ class ERM(Algorithm):
             lr=self.hparams["lr"],
             weight_decay=self.hparams['weight_decay']
         )
+        
+        
 
     def update(self, minibatches, unlabeled=None):
         all_x = torch.cat([x for x,y in minibatches])
@@ -126,8 +133,10 @@ class ERM_ViT(Algorithm):
                                   hparams)
 
         self.network = networks.ViT(input_shape, self.hparams,num_classes)
+        # self.classifier = networks.Classifier(768,num_classes,hparams['nonlinear_classifier'],init=hparams['weight_init']).to("cuda")
+        # self.network=nn.Sequential(self.featurizer,self.classifier)
         printNetworkParams(self.network)
-        self.optimizer = torch.optim.Adam(
+        self.optimizer = torch.optim.AdamW(
             self.network.parameters(),
             lr=self.hparams["lr"],
             weight_decay=self.hparams['weight_decay']
@@ -145,6 +154,1258 @@ class ERM_ViT(Algorithm):
 
     def predict(self, x):
         return self.network(x)
+
+class ERM_ViT_classifier_learning(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_ViT_classifier_learning, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes)
+        if(self.hparams['weight_init']=="clip"):
+            self.featurizer.network.proj=None
+        else:
+
+            self.featurizer.network.head=nn.Identity()
+        self.classifier = networks.Classifier(
+            768,
+            num_classes,
+            self.hparams['nonlinear_classifier'],init=self.hparams['weight_init'])
+        self.network = nn.Sequential(self.featurizer, self.classifier)
+        printNetworkParams(self.network)
+        self.optimizer = torch.optim.AdamW(
+            self.classifier.parameters(),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        loss = F.cross_entropy(self.predict(all_x), all_y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        return self.network(x)
+
+class ERM_ViT_LPFT(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_ViT_LPFT, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes)
+        if(self.hparams['weight_init']=="clip"):
+            self.featurizer.network.proj=None
+        else:
+
+            self.featurizer.network.head=nn.Identity()
+        self.classifier = networks.Classifier(
+            768,
+            num_classes,
+            self.hparams['nonlinear_classifier'],init=self.hparams['weight_init'])
+        self.network = nn.Sequential(self.featurizer, self.classifier)
+        printNetworkParams(self.network)
+        self.optimizer = torch.optim.AdamW(
+            self.network.parameters(),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.cnt=0
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        if(self.cnt<2500):
+            with torch.no_grad():
+                feat=self.featurizer(all_x)
+            loss=F.cross_entropy(self.classifier(feat), all_y)
+        else:
+            loss = F.cross_entropy(self.predict(all_x), all_y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        return self.network(x)
+
+class ERM_clip_text_conc_Frz(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+    
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_clip_text_conc_Frz, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
+        self.featurizer_orig = networks.ViT(input_shape, self.hparams,num_classes).network
+        if(self.hparams['weight_init']=="clip_full"):
+            print("clip_full")
+            # self.featurizer.network.proj=None
+        else:
+
+            self.featurizer.network.head=nn.Identity()
+        self.classifier = networks.Classifier(
+            1280,
+            num_classes,
+            self.hparams['nonlinear_classifier'],init=self.hparams['weight_init'])
+        # self.network = nn.Sequential(self.featurizer, self.classifier)
+        printNetworkParams(self.featurizer)
+        self.optimizer = torch.optim.AdamW(
+            list(self.featurizer.parameters())+list(self.classifier.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.Class_names=misc.Class_names
+        # print(self.Class_names)
+        self.cnt=0
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        with torch.no_grad():
+            text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in all_y]).to("cuda")
+            image_features = self.featurizer.encode_image(all_x)
+            text_features = self.featurizer.encode_text(text_inputs)
+            conc_feat=torch.cat([image_features,text_features],dim=1)
+        loss=F.cross_entropy(self.classifier(conc_feat), all_y)
+        # print(conc_feat.shape)
+        # if(self.cnt<2500):
+        #     with torch.no_grad():
+        #         feat=self.featurizer(all_x)
+        #     loss=F.cross_entropy(self.classifier(feat), all_y)
+        # else:
+        #     loss = F.cross_entropy(self.predict(all_x), all_y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        text_inputs = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+        with torch.no_grad():
+            image_features = self.featurizer_orig.encode_image(x)
+            text_features = self.featurizer_orig.encode_text(text_inputs)
+            # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
+            image_features = image_features @ self.featurizer_orig.visual.proj
+
+            image_features = image_features / image_features.norm(dim=1, keepdim=True)
+            text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        
+
+            # cosine similarity as logits
+            logit_scale = self.featurizer_orig.logit_scale.exp()
+
+            logits_per_image = logit_scale * image_features @ text_features.t()
+            indices=torch.argmax(logits_per_image,dim=1)
+            text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in indices]).to("cuda")
+            image_features = self.featurizer.encode_image(x)
+            text_features = self.featurizer.encode_text(text_inputs)
+            conc_feat=torch.cat([image_features,text_features],dim=1)
+            outs=self.classifier(conc_feat)
+            # print(indices)
+
+        return outs
+
+class ERM_clip_text_conc(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+    
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_clip_text_conc, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
+        self.featurizer_orig = networks.ViT(input_shape, self.hparams,num_classes).network
+        if(self.hparams['weight_init']=="clip_full"):
+            print("clip_full")
+            # self.featurizer.network.proj=None
+        else:
+
+            self.featurizer.network.head=nn.Identity()
+        self.classifier = networks.Classifier(
+            1280,
+            num_classes,
+            self.hparams['nonlinear_classifier'],init=self.hparams['weight_init'])
+        # self.network = nn.Sequential(self.featurizer, self.classifier)
+        printNetworkParams(self.featurizer)
+        self.optimizer = torch.optim.AdamW(
+            list(self.featurizer.parameters())+list(self.classifier.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.Class_names=misc.Class_names
+        # print(self.Class_names)
+        self.cnt=0
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        # with torch.no_grad():
+        text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in all_y]).to("cuda")
+        image_features = self.featurizer.encode_image(all_x)
+        text_features = self.featurizer.encode_text(text_inputs)
+        conc_feat=torch.cat([image_features,text_features],dim=1)
+        loss=F.cross_entropy(self.classifier(conc_feat), all_y)
+        # print(conc_feat.shape)
+        # if(self.cnt<2500):
+        #     with torch.no_grad():
+        #         feat=self.featurizer(all_x)
+        #     loss=F.cross_entropy(self.classifier(feat), all_y)
+        # else:
+        #     loss = F.cross_entropy(self.predict(all_x), all_y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        text_inputs = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+        
+        image_features = self.featurizer_orig.encode_image(x)
+        text_features = self.featurizer_orig.encode_text(text_inputs)
+        # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
+        image_features = image_features @ self.featurizer_orig.visual.proj
+
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+    
+
+        # cosine similarity as logits
+        logit_scale = self.featurizer_orig.logit_scale.exp()
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        indices=torch.argmax(logits_per_image,dim=1)
+        text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in indices]).to("cuda")
+        image_features = self.featurizer.encode_image(x)
+        text_features = self.featurizer.encode_text(text_inputs)
+        conc_feat=torch.cat([image_features,text_features],dim=1)
+        outs=self.classifier(conc_feat)
+        return outs
+
+class ERM_clip_weighted_text_conc(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+    
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_clip_weighted_text_conc, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
+        self.featurizer_orig = networks.ViT(input_shape, self.hparams,num_classes).network
+        if(self.hparams['weight_init']=="clip_full"):
+            print("clip_full")
+            # self.featurizer.network.proj=None
+        else:
+
+            self.featurizer.network.head=nn.Identity()
+        self.classifier = networks.Classifier(
+            1280,
+            num_classes,
+            self.hparams['nonlinear_classifier'],init=self.hparams['weight_init'])
+        # self.network = nn.Sequential(self.featurizer, self.classifier)
+        printNetworkParams(self.featurizer)
+        self.optimizer = torch.optim.AdamW(
+            list(self.featurizer.parameters())+list(self.classifier.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.Class_names=misc.Class_names
+        # print(self.Class_names)
+        self.cnt=0
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        # with torch.no_grad():
+        text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in all_y]).to("cuda")
+        image_features = self.featurizer.encode_image(all_x)
+        text_features = self.featurizer.encode_text(text_inputs)
+        
+        with torch.no_grad():
+            text_inputs_zero_sht = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+            text_features_zero_shot = self.featurizer.encode_text(text_inputs_zero_sht)
+            vis_text_proj = image_features @ self.featurizer_orig.visual.proj
+
+            image_features_ze = vis_text_proj / vis_text_proj.norm(dim=1, keepdim=True)
+            text_features_zero_shot = text_features_zero_shot / text_features_zero_shot.norm(dim=1, keepdim=True)
+            logit_scale = self.featurizer_orig.logit_scale.exp()
+        
+            logits_per_image = logit_scale * image_features_ze @ text_features_zero_shot.t()
+            prob=F.softmax(logits_per_image,dim=1)
+            prob=torch.max(prob,dim=1)
+            vals=prob.values.unsqueeze(1)
+            # print(vals.shape)
+        text_features=vals*text_features
+        # image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        # text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        conc_feat=torch.cat([image_features,text_features],dim=1)
+        loss=F.cross_entropy(self.classifier(conc_feat), all_y)
+        
+        # print(conc_feat.shape)
+        # if(self.cnt<2500):
+        #     with torch.no_grad():
+        #         feat=self.featurizer(all_x)
+        #     loss=F.cross_entropy(self.classifier(feat), all_y)
+        # else:
+        #     loss = F.cross_entropy(self.predict(all_x), all_y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        text_inputs = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+        
+        image_features = self.featurizer_orig.encode_image(x)
+        text_features = self.featurizer_orig.encode_text(text_inputs)
+        # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
+        image_features = image_features @ self.featurizer_orig.visual.proj
+
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+
+
+        # cosine similarity as logits
+        logit_scale = self.featurizer_orig.logit_scale.exp()
+        
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        prob=F.softmax(logits_per_image,dim=1)
+        prob=torch.max(prob,dim=1)
+        vals=prob.values.unsqueeze(1)
+        indices=prob.indices
+        text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in indices]).to("cuda")
+        image_features = self.featurizer.encode_image(x)
+        text_features = self.featurizer.encode_text(text_inputs)
+        text_features=vals*text_features
+        # image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        # text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        conc_feat=torch.cat([image_features,text_features],dim=1)
+        outs=self.classifier(conc_feat)
+        return outs
+
+class ERM_clip_weighted_text_confid(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+    
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_clip_weighted_text_confid, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
+        self.featurizer_orig = networks.ViT(input_shape, self.hparams,num_classes).network
+        if(self.hparams['weight_init']=="clip_full"):
+            print("clip_full")
+            # self.featurizer.network.proj=None
+        else:
+
+            self.featurizer.network.head=nn.Identity()
+        self.classifier = networks.Classifier(
+            1280,
+            num_classes,
+            self.hparams['nonlinear_classifier'],init=self.hparams['weight_init'])
+        # self.network = nn.Sequential(self.featurizer, self.classifier)
+        printNetworkParams(self.featurizer)
+        self.optimizer = torch.optim.AdamW(
+            list(self.featurizer.parameters())+list(self.classifier.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.Class_names=misc.Class_names
+        # print(self.Class_names)
+        self.cnt=0
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        # with torch.no_grad():
+        text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in all_y]).to("cuda")
+        image_features = self.featurizer.encode_image(all_x)
+        
+        
+        with torch.no_grad():
+            text_features = self.featurizer.encode_text(text_inputs)
+            text_inputs_zero_sht = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+            text_features_zero_shot = self.featurizer.encode_text(text_inputs_zero_sht)
+            vis_text_proj = image_features @ self.featurizer_orig.visual.proj
+
+            image_features_ze = vis_text_proj / vis_text_proj.norm(dim=1, keepdim=True)
+            text_features_zero_shot = text_features_zero_shot / text_features_zero_shot.norm(dim=1, keepdim=True)
+            logit_scale = self.featurizer_orig.logit_scale.exp()
+        
+            logits_per_image = logit_scale * image_features_ze @ text_features_zero_shot.t()
+            prob=F.softmax(logits_per_image,dim=1)
+            prob=torch.max(prob,dim=1)
+            vals=prob.values.unsqueeze(1)
+            # print(vals.shape)
+        text_features=vals*text_features
+        # image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        # text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        conc_feat=torch.cat([image_features,text_features],dim=1)
+        loss=F.cross_entropy(self.classifier(conc_feat), all_y)
+        
+        # print(conc_feat.shape)
+        # if(self.cnt<2500):
+        #     with torch.no_grad():
+        #         feat=self.featurizer(all_x)
+        #     loss=F.cross_entropy(self.classifier(feat), all_y)
+        # else:
+        #     loss = F.cross_entropy(self.predict(all_x), all_y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        text_inputs = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+        
+        image_features = self.featurizer_orig.encode_image(x)
+        text_features = self.featurizer_orig.encode_text(text_inputs)
+        # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
+        image_features = image_features @ self.featurizer_orig.visual.proj
+
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+
+
+        # cosine similarity as logits
+        logit_scale = self.featurizer_orig.logit_scale.exp()
+        
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        prob=F.softmax(logits_per_image,dim=1)
+        prob=torch.max(prob,dim=1)
+        vals=prob.values.unsqueeze(1)
+        indices=prob.indices
+        text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in indices]).to("cuda")
+        image_features = self.featurizer.encode_image(x)
+        text_features = self.featurizer.encode_text(text_inputs)
+        text_features=vals*text_features
+        # image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        # text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        conc_feat=torch.cat([image_features,text_features],dim=1)
+        outs=self.classifier(conc_feat)
+        return outs
+
+class ERM_clip_weighted_text_label_confid(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+    
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_clip_weighted_text_label_confid, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
+        self.featurizer_orig = networks.ViT(input_shape, self.hparams,num_classes).network
+        if(self.hparams['weight_init']=="clip_full"):
+            print("clip_full")
+            # self.featurizer.network.proj=None
+        else:
+
+            self.featurizer.network.head=nn.Identity()
+        self.classifier = networks.Classifier(
+            1280,
+            num_classes,
+            self.hparams['nonlinear_classifier'],init=self.hparams['weight_init'])
+        # self.network = nn.Sequential(self.featurizer, self.classifier)
+        printNetworkParams(self.featurizer)
+        self.optimizer = torch.optim.AdamW(
+            list(self.featurizer.parameters())+list(self.classifier.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.Class_names=misc.Class_names
+        # print(self.Class_names)
+        self.cnt=0
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        # with torch.no_grad():
+        text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in all_y]).to("cuda")
+        image_features = self.featurizer.encode_image(all_x)
+        
+        
+        with torch.no_grad():
+            text_features = self.featurizer.encode_text(text_inputs)
+            text_inputs_zero_sht = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+            text_features_zero_shot = self.featurizer.encode_text(text_inputs_zero_sht)
+            vis_text_proj = image_features @ self.featurizer_orig.visual.proj
+
+            image_features_ze = vis_text_proj / vis_text_proj.norm(dim=1, keepdim=True)
+            text_features_zero_shot = text_features_zero_shot / text_features_zero_shot.norm(dim=1, keepdim=True)
+            logit_scale = self.featurizer_orig.logit_scale.exp()
+        
+            logits_per_image = logit_scale * image_features_ze @ text_features_zero_shot.t()
+            prob=F.softmax(logits_per_image,dim=1)
+            vals=prob[torch.arange(len(all_x)), all_y].unsqueeze(1)
+  
+            # prob=torch.max(prob,dim=1)
+            # vals=prob.values.unsqueeze(1)
+            # print(vals.shape)
+        text_features=vals*text_features
+        # image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        # text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        conc_feat=torch.cat([image_features,text_features],dim=1)
+        loss=F.cross_entropy(self.classifier(conc_feat), all_y)
+        
+        # print(conc_feat.shape)
+        # if(self.cnt<2500):
+        #     with torch.no_grad():
+        #         feat=self.featurizer(all_x)
+        #     loss=F.cross_entropy(self.classifier(feat), all_y)
+        # else:
+        #     loss = F.cross_entropy(self.predict(all_x), all_y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        text_inputs = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+        
+        image_features = self.featurizer_orig.encode_image(x)
+        text_features = self.featurizer_orig.encode_text(text_inputs)
+        # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
+        image_features = image_features @ self.featurizer_orig.visual.proj
+
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+
+
+        # cosine similarity as logits
+        logit_scale = self.featurizer_orig.logit_scale.exp()
+        
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        prob=F.softmax(logits_per_image,dim=1)
+        prob=torch.max(prob,dim=1)
+        vals=prob.values.unsqueeze(1)
+        indices=prob.indices
+        text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in indices]).to("cuda")
+        image_features = self.featurizer.encode_image(x)
+        text_features = self.featurizer.encode_text(text_inputs)
+        text_features=vals*text_features
+        # image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        # text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        conc_feat=torch.cat([image_features,text_features],dim=1)
+        outs=self.classifier(conc_feat)
+        return outs
+
+class ERM_clip_patch_tokens_weighted_text_label_confid(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+    
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_clip_patch_tokens_weighted_text_label_confid, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
+        self.featurizer_orig = networks.ViT(input_shape, self.hparams,num_classes).network
+        if(self.hparams['weight_init']=="clip_full"):
+            print("clip_full")
+            # self.featurizer.network.proj=None
+        else:
+
+            self.featurizer.network.head=nn.Identity()
+        self.classifier = networks.Classifier(
+            2048,
+            num_classes,
+            self.hparams['nonlinear_classifier'],init=self.hparams['weight_init'])
+        # self.network = nn.Sequential(self.featurizer, self.classifier)
+        printNetworkParams(self.featurizer)
+        self.optimizer = torch.optim.AdamW(
+            list(self.featurizer.parameters())+list(self.classifier.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.Class_names=misc.Class_names
+        # print(self.Class_names)
+        self.cnt=0
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        # with torch.no_grad():
+        text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in all_y]).to("cuda")
+        image_features = self.featurizer.encode_image(all_x,return_all_token=True)
+        patch_tok=torch.mean(image_features[:, 1:, :],dim=1)
+        image_features=image_features[:, 0, :]
+        
+        
+        text_features = self.featurizer.encode_text(text_inputs)
+        
+        with torch.no_grad():
+            text_inputs_zero_sht = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+            text_features_zero_shot = self.featurizer.encode_text(text_inputs_zero_sht)
+            vis_text_proj = image_features @ self.featurizer_orig.visual.proj
+
+            image_features_ze = vis_text_proj / vis_text_proj.norm(dim=1, keepdim=True)
+            text_features_zero_shot = text_features_zero_shot / text_features_zero_shot.norm(dim=1, keepdim=True)
+            logit_scale = self.featurizer_orig.logit_scale.exp()
+        
+            logits_per_image = logit_scale * image_features_ze @ text_features_zero_shot.t()
+            prob=F.softmax(logits_per_image,dim=1)
+            vals=prob[torch.arange(len(all_x)), all_y].unsqueeze(1)
+  
+            # prob=torch.max(prob,dim=1)
+            # vals=prob.values.unsqueeze(1)
+            # print(vals.shape)
+        text_features=vals*text_features
+        # image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        # text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        conc_feat=torch.cat([image_features,patch_tok,text_features],dim=1)
+        loss=F.cross_entropy(self.classifier(conc_feat), all_y)
+        
+        # print(conc_feat.shape)
+        # if(self.cnt<2500):
+        #     with torch.no_grad():
+        #         feat=self.featurizer(all_x)
+        #     loss=F.cross_entropy(self.classifier(feat), all_y)
+        # else:
+        #     loss = F.cross_entropy(self.predict(all_x), all_y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        text_inputs = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+        
+        image_features = self.featurizer_orig.encode_image(x)
+        text_features = self.featurizer_orig.encode_text(text_inputs)
+        # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
+        image_features = image_features @ self.featurizer_orig.visual.proj
+
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+
+
+        # cosine similarity as logits
+        logit_scale = self.featurizer_orig.logit_scale.exp()
+        
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        prob=F.softmax(logits_per_image,dim=1)
+        prob=torch.max(prob,dim=1)
+        vals=prob.values.unsqueeze(1)
+        indices=prob.indices
+        text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in indices]).to("cuda")
+        image_features = self.featurizer.encode_image(x,return_all_token=True)
+        text_features = self.featurizer.encode_text(text_inputs)
+        text_features=vals*text_features
+        patch_tok=torch.mean(image_features[:, 1:, :],dim=1)
+        image_features=image_features[:, 0, :]
+        # image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        # text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        conc_feat=torch.cat([image_features,patch_tok,text_features],dim=1)
+        outs=self.classifier(conc_feat)
+        return outs
+
+class ERM_clip_patch_tokens_weighted_text_label_max_confid(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+    
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_clip_patch_tokens_weighted_text_label_max_confid, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
+        self.featurizer_orig = networks.ViT(input_shape, self.hparams,num_classes).network
+        if(self.hparams['weight_init']=="clip_full"):
+            print("clip_full")
+            # self.featurizer.network.proj=None
+        else:
+
+            self.featurizer.network.head=nn.Identity()
+        self.classifier = networks.Classifier(
+            2048,
+            num_classes,
+            self.hparams['nonlinear_classifier'],init=self.hparams['weight_init'])
+        # self.network = nn.Sequential(self.featurizer, self.classifier)
+        printNetworkParams(self.featurizer)
+        self.optimizer = torch.optim.AdamW(
+            list(self.featurizer.parameters())+list(self.classifier.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.Class_names=misc.Class_names
+        # print(self.Class_names)
+        self.cnt=0
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        # with torch.no_grad():
+        text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in all_y]).to("cuda")
+        image_features = self.featurizer.encode_image(all_x,return_all_token=True)
+        patch_tok=torch.mean(image_features[:, 1:, :],dim=1)
+        image_features=image_features[:, 0, :]
+        
+        
+        text_features = self.featurizer.encode_text(text_inputs)
+        
+        with torch.no_grad():
+            text_inputs_zero_sht = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+            text_features_zero_shot = self.featurizer.encode_text(text_inputs_zero_sht)
+            vis_text_proj = image_features @ self.featurizer_orig.visual.proj
+
+            image_features_ze = vis_text_proj / vis_text_proj.norm(dim=1, keepdim=True)
+            text_features_zero_shot = text_features_zero_shot / text_features_zero_shot.norm(dim=1, keepdim=True)
+            logit_scale = self.featurizer_orig.logit_scale.exp()
+        
+            logits_per_image = logit_scale * image_features_ze @ text_features_zero_shot.t()
+            prob=F.softmax(logits_per_image,dim=1)
+            # vals=prob[torch.arange(len(all_x)), all_y].unsqueeze(1)
+  
+            prob=torch.max(prob,dim=1)
+            vals=prob.values.unsqueeze(1)
+            # print(vals.shape)
+        text_features=vals*text_features
+        # image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        # text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        conc_feat=torch.cat([image_features,patch_tok,text_features],dim=1)
+        loss=F.cross_entropy(self.classifier(conc_feat), all_y)
+        
+        # print(conc_feat.shape)
+        # if(self.cnt<2500):
+        #     with torch.no_grad():
+        #         feat=self.featurizer(all_x)
+        #     loss=F.cross_entropy(self.classifier(feat), all_y)
+        # else:
+        #     loss = F.cross_entropy(self.predict(all_x), all_y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        text_inputs = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+        
+        image_features = self.featurizer_orig.encode_image(x)
+        text_features = self.featurizer_orig.encode_text(text_inputs)
+        # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
+        image_features = image_features @ self.featurizer_orig.visual.proj
+
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+
+
+        # cosine similarity as logits
+        logit_scale = self.featurizer_orig.logit_scale.exp()
+        
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        prob=F.softmax(logits_per_image,dim=1)
+        prob=torch.max(prob,dim=1)
+        vals=prob.values.unsqueeze(1)
+        indices=prob.indices
+        text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in indices]).to("cuda")
+        image_features = self.featurizer.encode_image(x,return_all_token=True)
+        text_features = self.featurizer.encode_text(text_inputs)
+        text_features=vals*text_features
+        patch_tok=torch.mean(image_features[:, 1:, :],dim=1)
+        image_features=image_features[:, 0, :]
+        # image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        # text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        conc_feat=torch.cat([image_features,patch_tok,text_features],dim=1)
+        outs=self.classifier(conc_feat)
+        return outs
+
+class CLIP(Algorithm):
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(CLIP, self).__init__(input_shape, num_classes, num_domains, hparams)
+        self.hparams = hparams
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        self.clip_model =  networks.ViT(input_shape, self.hparams,num_classes).network
+
+        # for param in self.clip_model.parameters():
+        #     param.requires_grad = False
+        
+        # print('Set self.clip_model.parameters.reguires_grad = False!')
+
+        # embedding dim for image and text encoder.
+        self.EMBEDDING_DIM = 512  # 
+        self.Class_names=misc.Class_names
+        classnames = [name.replace('_', ' ') for name in self.Class_names]
+        self.prompt = torch.cat([clip.tokenize(f'a photo of a {ppt}') for ppt in classnames]).to(self.device)
+        
+    def update(self, minibatches, unlabeled=None):
+        return {'loss': 0}
+    
+    def predict(self, x):
+        logits_per_image, _ = self.clip_model(x, self.prompt)
+        return logits_per_image.softmax(dim=-1)
+     
+
+# rename to DPL (Domain Prompt Learning)
+class DPLCLIP(CLIP):
+    def __init__(self, input_shape, num_classes, num_domains, hparams, sentence_prompt=True):
+        super(DPLCLIP, self).__init__(input_shape, num_classes, num_domains, hparams)
+
+        #  initial prompt.
+        prompt_prefix = ' '.join(['X'] * hparams['num_domain_tokens'])
+        self.Class_names=misc.Class_names
+        if sentence_prompt:
+            print('Using sentence_prompt in DPLCLIP...')
+            classnames = [f"a photo of a {name.replace('_', ' ')}" for name in self.Class_names]
+        else:
+            classnames = [name.replace('_', ' ') for name in self.Class_names]
+        prompts = [prompt_prefix + ' ' + name + '.' for name in classnames]
+        # prompts:  ['X X X X X X X X dog.', 'X X X X X X X X elephant.' ...]
+        
+        #  to get default token_prefix and token_suffix.
+        self.tokenized_prompts = torch.cat([clip.tokenize(p) for p in prompts]).to(self.device)
+        # tokenized_prompts[0] = tensor([49406,   343,   343,   343,   343,   343,   343,   343,   343,  1929, 269, 49407, 0, 0, ...])
+        with torch.no_grad():
+            embedding = self.clip_model.token_embedding(self.tokenized_prompts).type(self.clip_model.dtype)
+        
+        self.register_buffer('token_prefix', embedding[:, :1, :])  # SOS
+        #  torch.Size([7, 1, 512])
+        #  [-0.0001,  0.0002, -0.0046,  ...,  0.0010,  0.0025,  0.0049]
+        
+        self.register_buffer('token_suffix', embedding[:, hparams['num_domain_tokens'] + 1:, :])  # CLS, EOS
+        # torch.Size([7, 68, self.EMBEDDING_DIM]), 68 := 77 - num_domain_tokens_tokens - 2.
+        # [ 0.0013,  0.0046, -0.0115,  ...,  0.0112,  0.0147,  0.0040],...,.
+        
+        self.network = networks.MLP(self.EMBEDDING_DIM, self.EMBEDDING_DIM * hparams['num_domain_tokens'], hparams).to(device=self.device, dtype=self.clip_model.dtype)
+        
+        def init_weights(m):
+            if isinstance(m, nn.Linear):
+                torch.nn.init.xavier_uniform(m.weight)
+                m.bias.data.fill_(0.01)
+        
+        self.network.apply(init_weights)
+        self.num_domains=num_domains
+        self.optimizer = torch.optim.SGD(
+            self.network.parameters(),
+            lr=self.hparams["lr"],
+            momentum=self.hparams["momentum"]
+        )
+            
+    def update(self, minibatches, unlabeled=None):
+        # minibatches = [[domain_1], [domain_2], [domain_3]]
+        all_x = [data[0].cuda().float() for data in minibatches]
+
+        ##########Edited
+        all_y = torch.cat([data[1].cuda().long() for data in minibatches])
+        label_chunks=torch.chunk(all_y,chunks=self.num_domains,dim=0)
+        all_y =[[len(self.Class_names)*i+y for y in label_chunks[i]] for i in range(self.num_domains)]
+        all_y=torch.tensor(list(itertools.chain.from_iterable(all_y))).cuda().long()
+        # print(all_y)
+        # all_y= torch.cat([data[1].cuda().long() for data in minibatches]) ##########Edited
+        #  encode image for each domain.
+        image_features = [self.clip_model.encode_image(x) for x in all_x]
+        
+        #  extract domain_feature for each domain. [32, self.EMBEDDING_DIM] -> [32, self.EMBEDDING_DIM * num_domain_tokens] -> [self.EMBEDDING_DIM * num_domain_tokens].
+        domain_features = [self.network(feature) for feature in image_features]
+        image_features = torch.cat(image_features)
+        #  reshape [self.batch_size, self.EMBEDDING_DIM.]:  -> [1, self.EMBEDDING_DIM.]
+        mean_domain_features = [feature.mean(dim=0, keepdim=True) for feature in domain_features]
+
+        #  reshape [1, self.EMBEDDING_DIM.]:  -> [7, self.EMBEDDING_DIM.]
+        _mean_domain_features = [feature.repeat_interleave(len(self.Class_names), dim=0) for feature in mean_domain_features]
+        
+        #  generate text_feature from domain_feature. text_features.size = [3, 7, 512]
+        # text_features = [self._get_text_features(feature) for feature in _mean_domain_features]
+        text_features = torch.cat([self._get_text_features(feature) for feature in _mean_domain_features])
+            
+        image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+        logits_per_image = self.clip_model.logit_scale.exp() * image_features @ text_features.t()
+        # print(logits_per_image.shape)
+        # print(all_y)
+        loss = F.cross_entropy(logits_per_image, all_y)
+            
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        return {"loss": loss.item()}
+
+
+
+
+    def _get_text_features(self, domain_feature, coop=False):
+        #  reshape domain_feature: [7, 16 * self.EMBEDDING_DIM] -> [7, 16, self.EMBEDDING_DIM]
+        domain_feature = domain_feature.reshape(-1, self.hparams['num_domain_tokens'], self.EMBEDDING_DIM)
+        
+        #  reshape domain_feature: [7, 16, self.EMBEDDING_DIM] -> [7, 77, self.EMBEDDING_DIM]
+        domain_feature = torch.cat([self.token_prefix, domain_feature, self.token_suffix], dim=1)
+        
+        #  refer CoOp: CoOP github. https://github.com/KaiyangZhou/CoOp/blob/b0a058869cef00a4e4ea5256d40fd7681119c099/trainers/coop.py#L46
+        x = domain_feature + self.clip_model.positional_embedding.type(self.clip_model.dtype)
+        x = x.permute(1, 0, 2)
+        x = self.clip_model.transformer(x)
+        x = x.permute(1, 0, 2)
+        x = self.clip_model.ln_final(x).type(self.clip_model.dtype)
+        
+        #  mapping domain_features to text_features.
+        text_features = x[torch.arange(x.shape[0]), self.tokenized_prompts.argmax(dim=-1)] @ self.clip_model.text_projection      
+        return text_features
+
+    def predict(self, x):
+        image_feature = self.clip_model.encode_image(x)
+        
+        domain_feature = self.network(image_feature)
+        mean_domain_feature = torch.mean(domain_feature, dim=0, keepdim=True).repeat_interleave(len(self.Class_names), dim=0)
+        text_feature = self._get_text_features(mean_domain_feature)
+        
+        image_feature = image_feature / image_feature.norm(dim=-1, keepdim=True)
+        text_feature = text_feature / text_feature.norm(dim=-1, keepdim=True)
+        return self.clip_model.logit_scale.exp() * image_feature @ text_feature.t()
+
+# 
+class ERM_clip_WTC_DPL(DPLCLIP):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+    
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_clip_WTC_DPL, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
+
+        self.classifier = networks.Classifier(
+            1280,
+            num_classes,
+            self.hparams['nonlinear_classifier'])
+        # self.network = nn.Sequential(self.featurizer, self.classifier)
+        printNetworkParams(self.featurizer)
+        self.optimizer = torch.optim.AdamW(
+            list(self.featurizer.parameters())+list(self.classifier.parameters())+list(self.network.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        # self.optimizer = torch.optim.SGD(
+        #     self.network.parameters(),
+        #     lr=self.hparams["lr"],
+        #     momentum=self.hparams["momentum"]
+        # )
+        self.Class_names=misc.Class_names
+        # print(self.Class_names)
+        self.cnt=0
+
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = [data[0].cuda().float() for data in minibatches]
+        all_y = torch.cat([y for x,y in minibatches])
+        # with torch.no_grad():
+        # text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in all_y]).to("cuda")
+        image_features = self.featurizer.encode_image(torch.cat(all_x,dim=0))
+        # text_features_lrn = self.clip_model.encode_text(text_inputs)
+        
+        #######
+        label_chunks=torch.chunk(all_y,chunks=self.num_domains,dim=0)
+        all_y_d =[[len(self.Class_names)*i+y for y in label_chunks[i]] for i in range(self.num_domains)]
+        all_y_d=torch.tensor(list(itertools.chain.from_iterable(all_y_d))).cuda().long()
+        with torch.no_grad():
+        #  encode image for each domain.
+            vis_text_proj = [self.clip_model.encode_image(x) @ self.clip_model.visual.proj for x in all_x]
+     
+        
+        #  extract domain_feature for each domain. [32, self.EMBEDDING_DIM] -> [32, self.EMBEDDING_DIM * num_domain_tokens] -> [self.EMBEDDING_DIM * num_domain_tokens].
+        domain_features = [self.network(feature) for feature in vis_text_proj]
+        vis_text_proj = torch.cat(vis_text_proj)
+        #  reshape [self.batch_size, self.EMBEDDING_DIM.]:  -> [1, self.EMBEDDING_DIM.]
+        mean_domain_features = [feature.mean(dim=0, keepdim=True) for feature in domain_features]
+
+        #  reshape [1, self.EMBEDDING_DIM.]:  -> [7, self.EMBEDDING_DIM.]
+        _mean_domain_features = [feature.repeat_interleave(len(self.Class_names), dim=0) for feature in mean_domain_features]
+        
+        #  generate text_feature from domain_feature. text_features.size = [3, 7, 512]
+        # text_features = [self._get_text_features(feature) for feature in _mean_domain_features]
+        text_features = torch.cat([self._get_text_features(feature) for feature in _mean_domain_features])
+            
+        image_feature_orig = vis_text_proj / vis_text_proj.norm(dim=-1, keepdim=True)
+        text_features_norm = text_features / text_features.norm(dim=-1, keepdim=True)
+        logits_per_image = self.clip_model.logit_scale.exp() * image_feature_orig @ text_features_norm.t()
+
+        prob=F.softmax(logits_per_image,dim=1)
+        vals=prob[torch.arange(len(vis_text_proj)), all_y_d].unsqueeze(1)
+        # print(logits_per_image.shape)
+        # print(all_y)
+        loss = F.cross_entropy(logits_per_image, all_y_d)
+        ######
+        text_features=torch.index_select(text_features, 0, all_y_d)
+        text_features=vals*text_features
+        # image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        # text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        conc_feat=torch.cat([image_features,text_features],dim=1)
+        loss+=F.cross_entropy(self.classifier(conc_feat), all_y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+
+    def predict(self, x):
+
+        image_feature = self.clip_model.encode_image(x) @ self.clip_model.visual.proj
+        
+        domain_feature = self.network(image_feature)
+
+        mean_domain_feature = torch.mean(domain_feature, dim=0, keepdim=True).repeat_interleave(len(self.Class_names), dim=0)
+        text_feature = self._get_text_features(mean_domain_feature)
+        
+        image_feature = image_feature / image_feature.norm(dim=-1, keepdim=True)
+        text_feature_norm = text_feature / text_feature.norm(dim=-1, keepdim=True)
+        logits_per_image=self.clip_model.logit_scale.exp() * image_feature @ text_feature_norm.t()
+
+        prob=F.softmax(logits_per_image,dim=1)
+        prob=torch.max(prob,dim=1)
+        vals=prob.values.unsqueeze(1)
+        indices=prob.indices
+        # text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in indices]).to("cuda")
+        image_features = self.featurizer.encode_image(x)
+
+        text_feature=torch.index_select(text_feature, 0, indices)
+        text_feature=vals*text_feature
+
+        conc_feat=torch.cat([image_features,text_feature],dim=1)
+        outs=self.classifier(conc_feat)
+        return outs
+
+class ERM_clip_WTC_DPL_single_net(DPLCLIP):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+    
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_clip_WTC_DPL_single_net, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        # self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
+
+        self.classifier = networks.Classifier(
+            1280,
+            num_classes,
+            self.hparams['nonlinear_classifier'])
+        # self.network = nn.Sequential(self.featurizer, self.classifier)
+        printNetworkParams(self.clip_model)
+        self.optimizer = torch.optim.AdamW(
+            list(self.clip_model.parameters())+list(self.classifier.parameters())+list(self.network.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        # self.optimizer = torch.optim.SGD(
+        #     self.network.parameters(),
+        #     lr=self.hparams["lr"],
+        #     momentum=self.hparams["momentum"]
+        # )
+        self.Class_names=misc.Class_names
+        # print(self.Class_names)
+        self.cnt=0
+
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = [data[0].cuda().float() for data in minibatches]
+        all_y = torch.cat([y for x,y in minibatches])
+        # with torch.no_grad():
+        # text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in all_y]).to("cuda")
+ 
+        #######
+        label_chunks=torch.chunk(all_y,chunks=self.num_domains,dim=0)
+        all_y_d =[[len(self.Class_names)*i+y for y in label_chunks[i]] for i in range(self.num_domains)]
+        all_y_d=torch.tensor(list(itertools.chain.from_iterable(all_y_d))).cuda().long()
+    
+        #  encode image for each domain.
+        image_features = [self.clip_model.encode_image(x)  for x in all_x]
+        vis_text_proj=[x @ self.clip_model.visual.proj for x in image_features]
+        image_features=torch.cat(image_features)
+        #  extract domain_feature for each domain. [32, self.EMBEDDING_DIM] -> [32, self.EMBEDDING_DIM * num_domain_tokens] -> [self.EMBEDDING_DIM * num_domain_tokens].
+        domain_features = [self.network(feature) for feature in vis_text_proj]
+        vis_text_proj = torch.cat(vis_text_proj)
+        #  reshape [self.batch_size, self.EMBEDDING_DIM.]:  -> [1, self.EMBEDDING_DIM.]
+        mean_domain_features = [feature.mean(dim=0, keepdim=True) for feature in domain_features]
+
+        #  reshape [1, self.EMBEDDING_DIM.]:  -> [7, self.EMBEDDING_DIM.]
+        _mean_domain_features = [feature.repeat_interleave(len(self.Class_names), dim=0) for feature in mean_domain_features]
+        
+        #  generate text_feature from domain_feature. text_features.size = [3, 7, 512]
+        # text_features = [self._get_text_features(feature) for feature in _mean_domain_features]
+        text_features = torch.cat([self._get_text_features(feature) for feature in _mean_domain_features])
+            
+        image_feature_orig = vis_text_proj / vis_text_proj.norm(dim=-1, keepdim=True)
+        text_features_norm = text_features / text_features.norm(dim=-1, keepdim=True)
+        logits_per_image = self.clip_model.logit_scale.exp() * image_feature_orig @ text_features_norm.t()
+
+        prob=F.softmax(logits_per_image,dim=1)
+        vals=prob[torch.arange(len(vis_text_proj)), all_y_d].unsqueeze(1)
+     
+        loss = F.cross_entropy(logits_per_image, all_y_d)
+        ######
+        text_features=torch.index_select(text_features, 0, all_y_d)
+        text_features=vals*text_features
+
+        conc_feat=torch.cat([image_features,text_features],dim=1)
+        loss+=F.cross_entropy(self.classifier(conc_feat), all_y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+
+    def predict(self, x):
+
+        image_feature_conc = self.clip_model.encode_image(x) 
+        image_feature=image_feature_conc@ self.clip_model.visual.proj
+        domain_feature = self.network(image_feature)
+
+        mean_domain_feature = torch.mean(domain_feature, dim=0, keepdim=True).repeat_interleave(len(self.Class_names), dim=0)
+        text_feature = self._get_text_features(mean_domain_feature)
+        
+        image_feature = image_feature / image_feature.norm(dim=-1, keepdim=True)
+        text_feature_norm = text_feature / text_feature.norm(dim=-1, keepdim=True)
+        logits_per_image=self.clip_model.logit_scale.exp() * image_feature @ text_feature_norm.t()
+
+        prob=F.softmax(logits_per_image,dim=1)
+        prob=torch.max(prob,dim=1)
+        vals=prob.values.unsqueeze(1)
+        indices=prob.indices
+        # text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in indices]).to("cuda")
+        # image_features = self.featurizer.encode_image(x)
+
+        text_feature=torch.index_select(text_feature, 0, indices)
+        text_feature=vals*text_feature
+
+        conc_feat=torch.cat([image_feature_conc,text_feature],dim=1)
+        outs=self.classifier(conc_feat)
+        return outs
+
+class ERM_clip_WTC_DPL_no_conf(ERM_clip_WTC_DPL_single_net):
+    """
+    ERM_clip_WTC_DPL_test_conf : This is with single clip model
+    """
+    
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = [data[0].cuda().float() for data in minibatches]
+        all_y = torch.cat([y for x,y in minibatches])
+        # with torch.no_grad():
+        # text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in all_y]).to("cuda")
+ 
+        #######
+        label_chunks=torch.chunk(all_y,chunks=self.num_domains,dim=0)
+        all_y_d =[[len(self.Class_names)*i+y for y in label_chunks[i]] for i in range(self.num_domains)]
+        all_y_d=torch.tensor(list(itertools.chain.from_iterable(all_y_d))).cuda().long()
+    
+        #  encode image for each domain.
+        image_features = [self.clip_model.encode_image(x)  for x in all_x]
+        vis_text_proj=[x @ self.clip_model.visual.proj for x in image_features]
+        image_features=torch.cat(image_features)
+        #  extract domain_feature for each domain. [32, self.EMBEDDING_DIM] -> [32, self.EMBEDDING_DIM * num_domain_tokens] -> [self.EMBEDDING_DIM * num_domain_tokens].
+        domain_features = [self.network(feature) for feature in vis_text_proj]
+        vis_text_proj = torch.cat(vis_text_proj)
+        #  reshape [self.batch_size, self.EMBEDDING_DIM.]:  -> [1, self.EMBEDDING_DIM.]
+        mean_domain_features = [feature.mean(dim=0, keepdim=True) for feature in domain_features]
+
+        #  reshape [1, self.EMBEDDING_DIM.]:  -> [7, self.EMBEDDING_DIM.]
+        _mean_domain_features = [feature.repeat_interleave(len(self.Class_names), dim=0) for feature in mean_domain_features]
+        
+        #  generate text_feature from domain_feature. text_features.size = [3, 7, 512]
+        # text_features = [self._get_text_features(feature) for feature in _mean_domain_features]
+        text_features = torch.cat([self._get_text_features(feature) for feature in _mean_domain_features])
+            
+        image_feature_orig = vis_text_proj / vis_text_proj.norm(dim=-1, keepdim=True)
+        text_features_norm = text_features / text_features.norm(dim=-1, keepdim=True)
+        logits_per_image = self.clip_model.logit_scale.exp() * image_feature_orig @ text_features_norm.t()
+
+        # prob=F.softmax(logits_per_image,dim=1)
+        # vals=prob[torch.arange(len(vis_text_proj)), all_y_d].unsqueeze(1)
+     
+        loss = F.cross_entropy(logits_per_image, all_y_d)
+        ######
+        text_features=torch.index_select(text_features, 0, all_y_d)
+        # text_features=vals*text_features
+
+        conc_feat=torch.cat([image_features,text_features],dim=1)
+        loss+=F.cross_entropy(self.classifier(conc_feat), all_y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        self.cnt+=1
+        return {'loss': loss.item()}
+    
+    def predict(self, x):
+    
+        image_feature_conc = self.clip_model.encode_image(x) 
+        image_feature=image_feature_conc@ self.clip_model.visual.proj
+        domain_feature = self.network(image_feature)
+
+        mean_domain_feature = torch.mean(domain_feature, dim=0, keepdim=True).repeat_interleave(len(self.Class_names), dim=0)
+        text_feature = self._get_text_features(mean_domain_feature)
+        
+        image_feature = image_feature / image_feature.norm(dim=-1, keepdim=True)
+        text_feature_norm = text_feature / text_feature.norm(dim=-1, keepdim=True)
+        logits_per_image=self.clip_model.logit_scale.exp() * image_feature @ text_feature_norm.t()
+
+        prob=F.softmax(logits_per_image,dim=1)
+     
+        indices=prob.indices
+        # text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in indices]).to("cuda")
+        # image_features = self.featurizer.encode_image(x)
+
+        text_feature=torch.index_select(text_feature, 0, indices)
+        
+
+        conc_feat=torch.cat([image_feature_conc,text_feature],dim=1)
+        outs=self.classifier(conc_feat)
+        return outs
+
 
 class ERM_LowResolution_Pre(Algorithm):
     """

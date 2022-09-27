@@ -28,6 +28,7 @@ def format_mean(data, latex):
     standard error"""
     if len(data) == 0:
         return None, None, "X"
+    print(data)
     mean = 100 * np.mean(list(data))
     err = 100 * np.std(list(data) / np.sqrt(len(data)))
     if latex:
@@ -148,13 +149,16 @@ if __name__ == "__main__":
         description="Domain generalization testbed")
     parser.add_argument("--input_dir", type=str, required=True)
     parser.add_argument("--latex", action="store_true")
+    parser.add_argument('--test_post_results', type=bool, default=False)
+    parser.add_argument('--get_recursively',type=bool, default=False)
     args = parser.parse_args()
-
-    results_file = "results.tex" if args.latex else "results.txt"
-
+    if(args.test_post_results):
+        results_file = "results_test.tex" if args.latex else "results_test.txt"
+    else:
+        results_file = "results.tex" if args.latex else "results.txt"
     sys.stdout = misc.Tee(os.path.join(args.input_dir, results_file), "w")
 
-    records = reporting.load_records(args.input_dir)
+    records = reporting.load_records(args.input_dir,test_post_results=args.test_post_results,get_recursively=args.get_recursively)
 
     if args.latex:
         print("\\documentclass{article}")

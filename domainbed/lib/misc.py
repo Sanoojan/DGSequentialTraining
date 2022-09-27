@@ -18,6 +18,7 @@ import torch
 import tqdm
 from collections import Counter
 
+Class_names=[]
 
 def l2_between_dicts(dict_1, dict_2):
     assert len(dict_1) == len(dict_2)

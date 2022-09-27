@@ -202,6 +202,8 @@ class MultipleEnvironmentImageFolder(MultipleDomainDataset):
         ])
 
         self.datasets = []
+        path_for_cls = os.path.join(root, environments[0])
+        self.Class_names=sorted(os.listdir(path_for_cls))
         for i, environment in enumerate(environments):
 
             if augment and (i not in test_envs):

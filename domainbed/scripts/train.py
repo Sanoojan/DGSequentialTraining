@@ -57,7 +57,7 @@ if __name__ == "__main__":
     start_step = 0
     algorithm_dict = None
 
-    args.seed=0 # removing randomness on initialization (No trials)
+    # args.seed=0 # removing randomness on initialization (No trials)
 
     os.makedirs(args.output_dir, exist_ok=True)
     sys.stdout = misc.Tee(os.path.join(args.output_dir, 'out.txt'))
@@ -102,6 +102,7 @@ if __name__ == "__main__":
     if args.dataset in vars(datasets):
         dataset = vars(datasets)[args.dataset](args.data_dir,
             args.test_envs, hparams)
+        misc.Class_names=dataset.Class_names
     else:
         raise NotImplementedError
 

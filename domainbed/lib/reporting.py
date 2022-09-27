@@ -5,22 +5,55 @@ import collections
 import json
 import os
 
+
+
+
 import tqdm
 
 from domainbed.lib.query import Q
 
-def load_records(path):
+def load_records(path,test_post_results=False,get_recursively=False):
     records = []
-    for i, subdir in tqdm.tqdm(list(enumerate(os.listdir(path))),
-                               ncols=80,
-                               leave=False):
-        results_path = os.path.join(path, subdir, "results.jsonl")
-        try:
-            with open(results_path, "r") as f:
-                for line in f:
-                    records.append(json.loads(line[:-1]))
-        except IOError:
-            pass
+    if(get_recursively):
+        filelist = []
+
+        for root, dirs, files in os.walk(path):
+            for file in files:
+                #append the file name to the list
+                filelist.append(os.path.join(root,file))
+        if (test_post_results):
+            results_ext = "results_test.jsonl"
+        else:
+            results_ext = "results.jsonl"
+        for name in filelist:
+            if (results_ext in name):
+                results_path = name
+            else:
+                continue
+            try:
+                with open(results_path, "r") as f:
+                    for line in f:
+                        records.append(json.loads(line[:-1]))
+            except IOError:
+                pass
+
+    else:
+        for i, subdir in tqdm.tqdm(list(enumerate(os.listdir(path))),
+                                ncols=80,
+                                leave=False):
+            #we shall store all the file names in this list
+            
+            
+            if (test_post_results):
+                results_path = os.path.join(path, subdir, "results_test.jsonl")
+            else:
+                results_path = os.path.join(path, subdir, "results.jsonl")
+            try:
+                with open(results_path, "r") as f:
+                    for line in f:
+                        records.append(json.loads(line[:-1]))
+            except IOError:
+                pass
 
     return Q(records)
 

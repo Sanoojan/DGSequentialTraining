@@ -15,6 +15,7 @@ import shutil
 import time
 import uuid
 
+
 import numpy as np
 import torch
 
@@ -168,7 +169,8 @@ if __name__ == "__main__":
         single_test_envs=args.single_test_envs,
         hparams=args.hparams
     )
-
+    print("torch cuda...............................")
+    print(torch.cuda.is_available())
     jobs = [Job(train_args, args.output_dir) for train_args in args_list]
 
     for job in jobs:
