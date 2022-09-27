@@ -17,3 +17,5 @@ sweep.sh
 data_small/*
 
 data_small/PACS/
+domainbed/Outputs_old/
+domainbed/outputs_new/
