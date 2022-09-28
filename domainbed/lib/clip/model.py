@@ -261,7 +261,7 @@ class CLIP(nn.Module):
         super().__init__()
 
         self.context_length = context_length
-
+        print("transformer_width:",transformer_width,";transformer_layers:",transformer_layers,";transformer_heads:",transformer_heads)
         if isinstance(vision_layers, (tuple, list)):
             vision_heads = vision_width * 32 // 64
             self.visual = ModifiedResNet(
