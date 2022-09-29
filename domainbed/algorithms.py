@@ -483,7 +483,6 @@ class ERM_clip_cross_attn(Algorithm):
                                   hparams)
 
         self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
-        self.featurizer_orig = networks.ViT(input_shape, self.hparams,num_classes).network
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         if(self.hparams['weight_init']=="clip_full"):
             print("clip_full")
@@ -513,7 +512,7 @@ class ERM_clip_cross_attn(Algorithm):
         
         self.register_buffer('token_suffix', embedding[:, hparams['num_domain_tokens'] + 1:, :])  # CLS, EOS
 
-        self.network = networks.MLP(768, self.EMBEDDING_DIM * hparams['num_domain_tokens'], hparams).to(device=self.device, dtype=self.featurizer.dtype)
+        self.network = networks.MLP(512, self.EMBEDDING_DIM * hparams['num_domain_tokens'], hparams).to(device=self.device, dtype=self.featurizer.dtype)
 
         self.classifier = networks.Classifier(
             512,
@@ -566,24 +565,20 @@ class ERM_clip_cross_attn(Algorithm):
         all_y = torch.cat([y for x,y in minibatches])
         # with torch.no_grad():
         text_inputs  = torch.cat([tokenize(f"{self.prompt_prefix} a photo of a {self.Class_names[c]}") for c in all_y])
-        image_features = self.network(self.featurizer.encode_image(all_x))
-        
-    
-        fused_feat=self.encode_text_with_image(text_inputs,image_features)
+        image_features = self.featurizer.encode_image(all_x) @ self.featurizer.visual.proj
+        mlp_img_feat=self.network(image_features)
+        fused_feat=self.encode_text_with_image(text_inputs,mlp_img_feat)
         # print(fused_feat.shape)
+        text_features=self.featurizer.encode_text(torch.cat([tokenize(f"{self.prompt_prefix} a photo of a {c}") for c in self.Class_names]).to("cuda"))
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        logit_scale = self.featurizer.logit_scale.exp()
 
-        # image_features = image_features / image_features.norm(dim=1, keepdim=True)
-        # text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        loss=F.cross_entropy(logits_per_image, all_y)
         # conc_feat=torch.cat([image_features,text_features],dim=1)
-        loss=F.cross_entropy(self.classifier(fused_feat), all_y)
+        loss+=F.cross_entropy(self.classifier(fused_feat), all_y)
         
-        # print(conc_feat.shape)
-        # if(self.cnt<2500):
-        #     with torch.no_grad():
-        #         feat=self.featurizer(all_x)
-        #     loss=F.cross_entropy(self.classifier(feat), all_y)
-        # else:
-        #     loss = F.cross_entropy(self.predict(all_x), all_y)
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -592,19 +587,19 @@ class ERM_clip_cross_attn(Algorithm):
         return {'loss': loss.item()}
 
     def predict(self, x):
-        text_inputs = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+        text_inputs = torch.cat([tokenize(f"{self.prompt_prefix} a photo of a {c}") for c in self.Class_names]).to("cuda")
         
-        image_features_im = self.featurizer_orig.encode_image(x)
-        text_features = self.featurizer_orig.encode_text(text_inputs)
+        image_features_im = self.featurizer.encode_image(x) @ self.featurizer.visual.proj
+        text_features = self.featurizer.encode_text(text_inputs)
         # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
-        image_features = image_features_im @ self.featurizer.visual.proj
+        
 
-        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        image_features = image_features_im / image_features_im.norm(dim=1, keepdim=True)
         text_features = text_features / text_features.norm(dim=1, keepdim=True)
 
 
         # cosine similarity as logits
-        logit_scale = self.featurizer_orig.logit_scale.exp()
+        logit_scale = self.featurizer.logit_scale.exp()
         
 
         logits_per_image = logit_scale * image_features @ text_features.t()
@@ -614,14 +609,10 @@ class ERM_clip_cross_attn(Algorithm):
         indices=prob.indices
 
         text_inputs  = torch.cat([tokenize(f"{self.prompt_prefix} a photo of a {self.Class_names[c]}") for c in indices])
-        image_features = self.network(self.featurizer.encode_image(x))
+        image_features = self.network(image_features_im)
         # text_embedding = self.featurizer.token_embedding(text_inputs)
-    
         fused_feat=self.encode_text_with_image(text_inputs,image_features)
         
-        # text_features=vals*text_features
-        # image_features = image_features / image_features.norm(dim=1, keepdim=True)
-        # text_features = text_features / text_features.norm(dim=1, keepdim=True
         outs=self.classifier(fused_feat)
         return outs
 
@@ -631,7 +622,7 @@ class ERM_clip_featmatch(Algorithm):
     """
 
     def __init__(self, input_shape, num_classes, num_domains, hparams):
-        super(ERM_clip_cross_attn, self).__init__(input_shape, num_classes, num_domains,
+        super(ERM_clip_featmatch, self).__init__(input_shape, num_classes, num_domains,
                                   hparams)
 
         self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
