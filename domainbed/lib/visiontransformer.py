@@ -372,8 +372,10 @@ class VisionTransformer(nn.Module):
         else:
             return x[:, 0], x[:, 1]
 
-    def forward(self, x):
+    def forward(self, x,ret_feat=False):
         x = self.forward_features(x)
+        if(ret_feat):
+            return x
         if self.head_dist is not None:
             x, x_dist = self.head(x[0]), self.head_dist(x[1])  # x must be a tuple
             if self.training and not torch.jit.is_scripting():

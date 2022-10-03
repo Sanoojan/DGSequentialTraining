@@ -210,7 +210,18 @@ class ViT(torch.nn.Module):
                 # self.network.proj=nn.Parameter(0.03608439182435161 * torch.randn(768, num_classes))
                 # self.network.proj==None
             else:
-                raise NotImplementedError      
+                raise NotImplementedError     
+        elif hparams['weight_init']=="clip_scratch":
+            if hparams['backbone']=="DeitBase":
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                model, preprocess = clip.load('ViT-B/16', device,scratch=True)
+                # model=model.float()
+                self.network=model.float()
+                
+                # self.network.proj=nn.Parameter(0.03608439182435161 * torch.randn(768, num_classes))
+                # self.network.proj==None
+            else:
+                raise NotImplementedError   
         
         elif hparams['weight_init']=="Random":
             if hparams['backbone']=="DeitSmall":
