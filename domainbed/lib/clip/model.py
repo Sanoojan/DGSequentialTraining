@@ -293,7 +293,7 @@ class CLIP(nn.Module):
         self.token_embedding = nn.Embedding(vocab_size, transformer_width)
         self.positional_embedding = nn.Parameter(torch.empty(self.context_length, transformer_width))
         self.ln_final = LayerNorm(transformer_width)
-
+        self.prompts = nn.Parameter(torch.zeros(1, 10, embed_dim)) #
         self.text_projection = nn.Parameter(torch.empty(transformer_width, embed_dim))
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
 
@@ -302,6 +302,7 @@ class CLIP(nn.Module):
     def initialize_parameters(self):
         nn.init.normal_(self.token_embedding.weight, std=0.02)
         nn.init.normal_(self.positional_embedding, std=0.01)
+        nn.init.normal_(self.prompts, std=0.02)
 
         if isinstance(self.visual, ModifiedResNet):
             if self.visual.attnpool is not None:
@@ -343,9 +344,16 @@ class CLIP(nn.Module):
     def encode_image(self, image,return_all_token=False):
         return self.visual(image.type(self.dtype),return_all_token=return_all_token)
 
-    def encode_text(self, text):
-        x = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
-
+    def encode_text(self, text,no_embed=False,EOS_pos=None):
+        if(no_embed==False):
+            x = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
+            # print("text",text.shape)
+            # print("no_embed",x.shape)
+            EOS_pos=text.argmax(dim=-1)
+        else:
+            x=text.type(self.dtype)
+            EOS_pos=EOS_pos
+            # print("else:",x.shape)
         x = x + self.positional_embedding.type(self.dtype)
         x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer(x)
@@ -354,7 +362,7 @@ class CLIP(nn.Module):
 
         # x.shape = [batch_size, n_ctx, transformer.width]
         # take features from the eot embedding (eot_token is the highest number in each sequence)
-        x = x[torch.arange(x.shape[0]), text.argmax(dim=-1)] @ self.text_projection 
+        x = x[torch.arange(x.shape[0]), EOS_pos] @ self.text_projection 
 
         return x
 
@@ -436,5 +444,5 @@ def build_model(state_dict: dict,scratch=False):
 
     convert_weights(model)
     if (scratch==False):
-        model.load_state_dict(state_dict)
+        model.load_state_dict(state_dict,strict=False)
     return model.eval()

@@ -473,6 +473,117 @@ class Clip_train(Algorithm):
         
         return logits_per_image
 
+class Clip_train_prompt(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+    
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(Clip_train_prompt, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
+        if(self.hparams['weight_init']=="clip_full"):
+            print("clip_full")
+            # self.featurizer.network.proj=None
+        # else:
+
+        #     self.featurizer.network.head=nn.Identity()
+
+        # self.network = nn.Sequential(self.featurizer, self.classifier)
+        num_prompts=10
+        # self.prompts = nn.Parameter(torch.zeros(1, num_prompts, 512))
+        # self.prompts.requires_grad_()
+        # nn.init.trunc_normal_(self.prompts, std=.02)
+
+        
+
+        printNetworkParams(self.featurizer)
+        self.optimizer = torch.optim.AdamW(
+            list(self.featurizer.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.Class_names=misc.Class_names
+        # print(self.Class_names)
+        self.cnt=0
+        self.num_classes=num_classes
+        prompt_prefix = ' '.join(['X'] * num_prompts)
+        classnames = [f"a photo of a {name.replace('_', ' ')}" for name in self.Class_names]
+        prompts = [prompt_prefix + ' ' + name + '.' for name in classnames]
+        self.tokenized_prompts = torch.cat([clip.tokenize(p) for p in prompts]).to("cuda")
+        with torch.no_grad():
+            embedding = self.featurizer.token_embedding(self.tokenized_prompts).type(self.featurizer.dtype)
+        self.register_buffer('token_prefix', embedding[:, :1, :])  # SOS
+        self.register_buffer('token_suffix', embedding[:, num_prompts + 1:, :])  # CLS, EOS
+
+    def _get_text_features(self, coop=False):
+        #  reshape domain_feature: [7, 16 * self.EMBEDDING_DIM] -> [7, 16, self.EMBEDDING_DIM]
+
+        # domain_feature = domain_feature.reshape(-1, self.hparams['num_domain_tokens'], self.EMBEDDING_DIM)
+
+        # prompt_feature=self.prompts.expand(x.shape[0], -1, -1)
+        prompt_feature=self.featurizer.prompts.expand(self.num_classes, -1, -1)
+        
+        # print(self.token_prefix.shape)
+        # print(prompt_feature.shape)
+        #  reshape domain_feature: [7, 16, self.EMBEDDING_DIM] -> [7, 77, self.EMBEDDING_DIM]
+        prompt_feature = torch.cat([self.token_prefix, prompt_feature, self.token_suffix], dim=1)
+        
+        #  refer CoOp: CoOP github. https://github.com/KaiyangZhou/CoOp/blob/b0a058869cef00a4e4ea5256d40fd7681119c099/trainers/coop.py#L46
+        x = prompt_feature + self.featurizer.positional_embedding.type(self.featurizer.dtype)
+        x = x.permute(1, 0, 2)
+        x = self.featurizer.transformer(x)
+        x = x.permute(1, 0, 2)
+        x = self.featurizer.ln_final(x).type(self.featurizer.dtype)
+        
+        #  mapping domain_features to text_features.
+        text_features = x[torch.arange(x.shape[0]), self.tokenized_prompts.argmax(dim=-1)] @ self.featurizer.text_projection      
+        # print(text_features.shape)
+        return text_features
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        # with torch.no_grad():
+        # text_inputs  = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+        image_features = self.featurizer.encode_image(all_x)
+
+        text_features = self._get_text_features()
+        image_features = image_features @ self.featurizer.visual.proj
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        logit_scale = self.featurizer.logit_scale.exp()
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        loss=F.cross_entropy(logits_per_image, all_y)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        text_inputs = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+        
+        image_features = self.featurizer.encode_image(x)
+        # text_features = self.featurizer.encode_text(text_inputs)
+        text_features = self._get_text_features()
+        # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
+        image_features = image_features @ self.featurizer.visual.proj
+
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+    
+
+        # cosine similarity as logits
+        logit_scale = self.featurizer.logit_scale.exp()
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        
+        return logits_per_image
+
 class Clip_train_mixup(Algorithm):
     """
     Empirical Risk Minimization (ERM)
@@ -502,14 +613,13 @@ class Clip_train_mixup(Algorithm):
         # print(self.Class_names)
         self.cnt=0
         self.num_domains=num_domains
-        self.mixup_weight=0.8
+        self.mixup_weight=0.6
 
     def update(self, minibatches, unlabeled=None):
         all_x = torch.cat([x for x,y in minibatches])
         all_y = torch.cat([y for x,y in minibatches])
         
         image_features = self.featurizer.encode_image(all_x)
-        domain_split=torch.chunk(image_features,chunks=self.num_domains)
         mixup_features=torch.clone(image_features)
         mixup_features_chunk=torch.chunk(mixup_features,chunks=self.num_domains)
         mixup_features=self.mixup_weight*mixup_features
@@ -519,8 +629,14 @@ class Clip_train_mixup(Algorithm):
         a=(a*(1-self.mixup_weight)/sum).to("cuda")
 
         #for now works only for 4 domain datasets
-        mixup_features2=torch.unsqueeze(a[:,0],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[1],mixup_features_chunk[2],mixup_features_chunk[0]]),dim=0)
-        mixup_features3=torch.unsqueeze(a[:,1],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[2],mixup_features_chunk[0],mixup_features_chunk[1]]),dim=0)
+        if(self.num_domains==3):
+            mixup_features2=torch.unsqueeze(a[:,0],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[1],mixup_features_chunk[2],mixup_features_chunk[0]]),dim=0)
+            mixup_features3=torch.unsqueeze(a[:,1],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[2],mixup_features_chunk[0],mixup_features_chunk[1]]),dim=0)
+        elif(self.num_domains==5):
+            mixup_features2=torch.unsqueeze(a[:,0],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[1],mixup_features_chunk[2],mixup_features_chunk[3],mixup_features_chunk[4],mixup_features_chunk[0]]),dim=0)
+            mixup_features3=torch.unsqueeze(a[:,1],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[2],mixup_features_chunk[3],mixup_features_chunk[4],mixup_features_chunk[0],mixup_features_chunk[1]]),dim=0)
+            mixup_features4=torch.unsqueeze(a[:,1],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[3],mixup_features_chunk[4],mixup_features_chunk[0],mixup_features_chunk[1],mixup_features_chunk[2]]),dim=0)
+            mixup_features5=torch.unsqueeze(a[:,1],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[4],mixup_features_chunk[0],mixup_features_chunk[1],mixup_features_chunk[2],mixup_features_chunk[3]]),dim=0)
         # print(mixup_features2.dtype)
         # print(mixup_features3.dtype)
         # for dom in range(self.num_domains):
@@ -539,8 +655,12 @@ class Clip_train_mixup(Algorithm):
         #         mixup_features[dom]+=domain_split[dom_sel]*torch.unsqueeze(b[:,dom_sel],dim=1).expand(-1,768)
         # mixup_features=torch.cat(mixup_features,dim=0)
 
-        mixup_features=mixup_features+mixup_features2+mixup_features3
-        # with torch.no_grad():
+        if(self.num_domains==3):
+            mixup_features=mixup_features+mixup_features2+mixup_features3
+        elif(self.num_domains==5):
+            mixup_features=mixup_features+mixup_features2+mixup_features3+mixup_features4+mixup_features5
+       
+ 
         
         with torch.no_grad():
             text_inputs  = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
@@ -558,6 +678,138 @@ class Clip_train_mixup(Algorithm):
         loss=F.cross_entropy(logits_per_image, all_y)
         loss1=F.cross_entropy(logits_per_image_mixup, all_y)
         loss=loss+loss1
+        
+        # print(loss)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        text_inputs = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+        
+        image_features = self.featurizer.encode_image(x)
+        text_features = self.featurizer.encode_text(text_inputs)
+        # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
+        image_features = image_features @ self.featurizer.visual.proj
+
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+    
+
+        # cosine similarity as logits
+        logit_scale = self.featurizer.logit_scale.exp()
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        
+        return logits_per_image
+
+class Clip_train_mixup_with_text(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+    
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(Clip_train_mixup_with_text, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
+        if(self.hparams['weight_init']=="clip_full"):
+            print("clip_full")
+            # self.featurizer.network.proj=None
+        # else:
+
+        #     self.featurizer.network.head=nn.Identity()
+
+        # self.network = nn.Sequential(self.featurizer, self.classifier)
+        printNetworkParams(self.featurizer)
+        self.optimizer = torch.optim.AdamW(
+            list(self.featurizer.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.Class_names=misc.Class_names
+        # print(self.Class_names)
+        self.cnt=0
+        self.num_domains=num_domains
+        self.mixup_weight=0.6
+
+    
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        
+        image_features = self.featurizer.encode_image(all_x)
+        mixup_features=torch.clone(image_features)
+
+        mixup_features_chunk=torch.chunk(mixup_features,chunks=self.num_domains)
+        mixup_features=self.mixup_weight*mixup_features
+
+        # text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in all_y]).to("cuda")
+        mixup_text=torch.cat([tokenize(f"a photo of a {self.Class_names[c]}") for c in all_y]).to("cuda")
+        EOS_pos=mixup_text.argmax(dim=-1)
+        mixup_text=self.featurizer.token_embedding(mixup_text).type(self.featurizer.dtype)
+        mixup_text_chunk=torch.chunk(mixup_text,chunks=self.num_domains)
+        mixup_text=self.mixup_weight*mixup_text
+
+        a=torch.rand(int(len(all_x)),self.num_domains-1)
+        sum=torch.sum(a,dim=1,keepdims=True)
+        a=(a*(1-self.mixup_weight)/sum).to("cuda")
+
+        #for now works only for 4 domain datasets
+        if(self.num_domains==3):
+            mixup_features2=torch.unsqueeze(a[:,0],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[1],mixup_features_chunk[2],mixup_features_chunk[0]]),dim=0)
+            mixup_features3=torch.unsqueeze(a[:,1],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[2],mixup_features_chunk[0],mixup_features_chunk[1]]),dim=0)
+           
+            mixup_text2=a[:,0].view(-1,1,1).expand(-1,77,512)*torch.cat(([mixup_text_chunk[1],mixup_text_chunk[2],mixup_text_chunk[0]]),dim=0)
+            mixup_text3=a[:,1].view(-1,1,1).expand(-1,77,512)*torch.cat(([mixup_text_chunk[2],mixup_text_chunk[0],mixup_text_chunk[1]]),dim=0)
+
+        elif(self.num_domains==5):
+            mixup_features2=torch.unsqueeze(a[:,0],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[1],mixup_features_chunk[2],mixup_features_chunk[3],mixup_features_chunk[4],mixup_features_chunk[0]]),dim=0)
+            mixup_features3=torch.unsqueeze(a[:,1],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[2],mixup_features_chunk[3],mixup_features_chunk[4],mixup_features_chunk[0],mixup_features_chunk[1]]),dim=0)
+            mixup_features4=torch.unsqueeze(a[:,2],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[3],mixup_features_chunk[4],mixup_features_chunk[0],mixup_features_chunk[1],mixup_features_chunk[2]]),dim=0)
+            mixup_features5=torch.unsqueeze(a[:,3],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[4],mixup_features_chunk[0],mixup_features_chunk[1],mixup_features_chunk[2],mixup_features_chunk[3]]),dim=0)
+        
+
+        if(self.num_domains==3):
+            mixup_features=mixup_features+mixup_features2+mixup_features3
+            mixup_text=mixup_text+mixup_text2+mixup_text3
+            # print(mixup_text.shape)
+        elif(self.num_domains==5):
+            mixup_features=mixup_features+mixup_features2+mixup_features3+mixup_features4+mixup_features5
+       
+ 
+        
+        with torch.no_grad():
+            text_inputs  = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+            text_features = self.featurizer.encode_text(text_inputs)
+            mixup_text_feature=self.featurizer.encode_text(mixup_text,no_embed=True,EOS_pos=EOS_pos)
+        image_features = image_features @ self.featurizer.visual.proj
+        mixup_features=mixup_features @ self.featurizer.visual.proj
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        mixup_features = mixup_features / mixup_features.norm(dim=1, keepdim=True)
+
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        mixup_text_feature = mixup_text_feature / mixup_text_feature.norm(dim=1, keepdim=True)
+        logit_scale = self.featurizer.logit_scale.exp()
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        logits_per_image_mixup=logit_scale * mixup_features @ mixup_text_feature.t()
+        logits_per_text_mixup = logits_per_image_mixup.t()
+        
+        labels = torch.tensor(np.arange(len(all_x))).to("cuda")
+
+        loss_i = F.cross_entropy(logits_per_image_mixup, labels)
+        loss_t = F.cross_entropy(logits_per_text_mixup, labels)
+        loss = (loss_i + loss_t)/2
+    
+        loss+=F.cross_entropy(logits_per_image, all_y)
+
+
+        # loss1=F.cross_entropy(logits_per_image_mixup, all_y)
+        # loss=loss+loss1
         
         # print(loss)
         self.optimizer.zero_grad()

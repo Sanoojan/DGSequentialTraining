@@ -294,7 +294,7 @@ if __name__ == "__main__":
                 save_checkpoint(f'model_step{step}.pkl')
     stop_time=time.time()           
     print("Time taken to train: ",str((stop_time-start_time)/60.0)," minutes")
-    save_checkpoint('model.pkl')
+    # save_checkpoint('model.pkl')
     if(args.save_best_model):
         save_checkpoint_best(savename,model_save)
     with open(os.path.join(args.output_dir, 'done'), 'w') as f:
