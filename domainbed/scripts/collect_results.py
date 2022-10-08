@@ -151,8 +151,12 @@ if __name__ == "__main__":
     parser.add_argument("--latex", action="store_true")
     parser.add_argument('--test_post_results', type=bool, default=False)
     parser.add_argument('--get_recursively',type=bool, default=False)
+    parser.add_argument("--iter", type=int, required=False,default=None)
     args = parser.parse_args()
-    if(args.test_post_results):
+    model_selection.step_lim=args.iter
+    if (args.iter is not None):
+        results_file = "results_"+str(args.iter)+".tex" if args.latex else "results_"+str(args.iter)+".txt"
+    elif(args.test_post_results):
         results_file = "results_test.tex" if args.latex else "results_test.txt"
     else:
         results_file = "results.tex" if args.latex else "results.txt"

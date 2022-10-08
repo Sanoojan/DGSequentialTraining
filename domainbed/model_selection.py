@@ -2,6 +2,8 @@
 
 import itertools
 import numpy as np
+from domainbed.lib.query import Q
+step_lim=None
 
 def get_test_records(records):
     """Given records with a common test env, get the test records (i.e. the
@@ -14,6 +16,7 @@ class SelectionMethod:
 
     def __init__(self):
         raise TypeError
+        
 
     @classmethod
     def run_acc(self, run_records):
@@ -80,6 +83,7 @@ class IIDAccuracySelectionMethod(SelectionMethod):
     """Picks argmax(mean(env_out_acc for env in train_envs))"""
     name = "training-domain validation set"
     
+
     @classmethod
     def _step_acc(self, record):
         """Given a single record, return a {val_acc, test_acc} dict."""
@@ -100,10 +104,16 @@ class IIDAccuracySelectionMethod(SelectionMethod):
     @classmethod
     def run_acc(self, run_records):
         test_records = get_test_records(run_records)
+        # print(test_records)
+        if step_lim is not None:
+            iter_index = next((index for (index, d) in enumerate(test_records) if d["step"] == step_lim), None)
+   
+            test_records=Q(test_records[:iter_index+1])
+     
+
         if not len(test_records):
             return None
-    
-
+  
         print("test_env:",test_records[0]['args']['test_envs'][0])
         print(test_records.map(self._step_acc).argmax('val_acc'))
         return test_records.map(self._step_acc).argmax('val_acc')

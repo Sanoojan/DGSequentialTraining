@@ -60,6 +60,11 @@ def _hparams(algorithm, dataset, random_seed):
         _hparam('mlp_depth', 3, lambda r: int(r.choice([3])))
         _hparam('mlp_width', 512, lambda r: int(r.choice([256, 512])))
         _hparam('mlp_dropout', 0.1, lambda r: r.choice([0.0, 0.1]))
+    # 
+
+    elif algorithm in ["Clip_domain_mixup_with_text_cascaded"]:
+        _hparam('num_mixups', 3, lambda r: r.choice([1,2,3,4]))
+        _hparam('cascaded', False, lambda r: False)
 
     elif algorithm == 'Fish':
         _hparam('meta_lr', 0.5, lambda r:r.choice([0.05, 0.1, 0.5]))
