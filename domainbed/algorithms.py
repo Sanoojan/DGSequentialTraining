@@ -943,10 +943,12 @@ class Clip_domain_mixup(Clip_train_mixup):
     def __init__(self, input_shape, num_classes, num_domains, hparams):
         super(Clip_domain_mixup, self).__init__(input_shape, num_classes, num_domains,
                                   hparams)
-        self.mixup_weight=0.84
-        self.num_mixups=3
+        self.mixup_weight=self.hparams['mixup_weight']
+   
         print("mixup_weight:",self.mixup_weight)
-        self.cascaded=True
+ 
+        self.num_mixups=self.hparams['num_mixups']
+        self.cascaded=self.hparams['cascaded']
 
     def update(self, minibatches, unlabeled=None):
     

@@ -55,16 +55,16 @@ do
         do
             python -m domainbed.scripts.sweep $command\
                 --data_dir=/nfs/users/ext_sanoojan.baliah/Sanoojan/DG/data \
-                --output_dir=./domainbed/outputs_new/ERM_clip_WTC_DPL_no_conf/${dataset}/lr-${lr}\
+                --output_dir=./domainbed/outputs_new/Clip_domain_mixup-multiple-0.6-3/${dataset}/lr-${lr}\
                 --command_launcher multi_gpu\
-                --algorithms ERM_clip_WTC_DPL_no_conf \
+                --algorithms Clip_domain_mixup \
                 --single_test_envs \
                 --datasets ${dataset} \
                 --n_hparams 1  \
                 --n_trials 3 \
-                --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":${lr},\"batch_size\":32}"""\
+                --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":${lr},\"batch_size\":32,\"cascaded\":0,\"num_mixups=\":3,\"mixup_weight\":0.6}"""\
                 --skip_confirmation  
-        done > Outs/clipBase-${dataset}-ERM_clip_WTC_DPL_no_conf.out
+        done > Outs/clipBase-${dataset}-Clip_domain_mixup.out
     done
 done
 
