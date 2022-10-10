@@ -66,7 +66,7 @@ def _hparams(algorithm, dataset, random_seed):
         _hparam('num_mixups', 3, lambda r: r.choice([1,2,3,4]))
         _hparam('cascaded', False, lambda r: False)
 
-    elif algorithm in ["Clip_domain_mixup"]:
+    elif algorithm in ["Clip_domain_mixup","ERM_ViT_mixup"]:
         _hparam('num_mixups', 3, lambda r: r.choice([1,2,3,4]))
         _hparam('cascaded', False, lambda r: False)
         _hparam('mixup_weight',  0.6, lambda r: r.choice([0.5,0.6,0.7])) 
@@ -161,7 +161,7 @@ def _hparams(algorithm, dataset, random_seed):
     elif algorithm == 'ARM':
         _hparam('batch_size', 8, lambda r: 8)
     elif dataset == 'DomainNet':
-        _hparam('batch_size', 32, lambda r: int(2**r.uniform(3, 5)))
+        _hparam('batch_size', 16, lambda r: int(2**r.uniform(3, 5)))
     else:
         _hparam('batch_size', 32, lambda r: int(2**r.uniform(3, 5.5)))
 
