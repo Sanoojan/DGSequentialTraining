@@ -182,7 +182,7 @@ class ViT(torch.nn.Module):
                 raise NotImplementedError
         elif hparams['weight_init']=="ImageNet21k":
             if hparams['backbone']=="VitBase":
-                self.network = vit_base_patch16_224_miil_in21k(pretrained=True)
+                self.network = vit_base_patch16_224_in21k(pretrained=True)
                 self.network.head = nn.Linear(768, num_classes)
             else:
                 raise NotImplementedError
