@@ -221,12 +221,13 @@ class VisionTransformer(nn.Module):
 
         return self.pos_drop(x)
 
-    def forward(self, x):
+    def forward(self, x,ret_feat=False):
         x = self.prepare_tokens(x)
         for blk in self.blocks:
             x = blk(x)
         x = self.norm(x)
-       
+        if(ret_feat):
+            return x[:,0]
         if self.distilled:
             return self.head(x[:, 0]),self.head_dist(x[:, -self.num_dist_token:]) 
         return self.head(x[:,0]) 
