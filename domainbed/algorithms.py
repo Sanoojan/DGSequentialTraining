@@ -1244,12 +1244,11 @@ class Clip_train_mixup_with_text(Algorithm):
         # mixup_text=self.featurizer.token_embedding(mixup_text).type(self.featurizer.dtype)
         mixup_text_chunk=torch.chunk(mixup_text_feature,chunks=self.num_domains)
 
-    
-     
+        bs=int(len(all_x)/self.num_domains)
+        ba=int(len(all_x))
         a=torch.rand(int(len(all_x)),self.num_domains)
         sum=torch.sum(a,dim=1,keepdims=True)
         a=(a*(1)/sum).to("cuda")
-        
         mixup_features=torch.unsqueeze(a[:,0],dim=1).expand(-1,768)*mixup_features
         mixup_text_feature=torch.unsqueeze(a[:,0],dim=1).expand(-1,512)*mixup_text_feature
         for d in range(1,self.num_domains):
