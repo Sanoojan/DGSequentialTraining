@@ -104,6 +104,8 @@ class ResNet(torch.nn.Module):
                 self.network = torchvision.models.resnet50()
                 self.n_outputs = 2048
             self.apply(self._init_weights_trunc_normal)
+        
+            
         # self.network = remove_batch_norm_from_resnet(self.network)
             
         # adapt number of channels
@@ -172,6 +174,7 @@ class ViT(torch.nn.Module):
             if hparams['backbone']=="DeitSmall":
                 self.network = deit_small_patch16_224(pretrained=True)
                 self.network.head = nn.Linear(384, num_classes)
+                self.n_outputs = 384
             elif hparams['backbone']=="CVTSmall":
                 self.network = small_cvt(pretrained=True)
                 self.network.head = nn.Linear(384, num_classes)
@@ -203,6 +206,7 @@ class ViT(torch.nn.Module):
                 self.network=model.visual.float()
                 
                 self.network.proj=nn.Parameter(0.03608439182435161 * torch.randn(768, num_classes))
+                self.n_outputs = 768
                 # self.network.proj==None
             else:
                 raise NotImplementedError       
@@ -212,7 +216,7 @@ class ViT(torch.nn.Module):
                 model, preprocess = clip.load('ViT-B/16', device)
                 # model=model.float()
                 self.network=model.float()
-                
+                self.n_outputs = 768
                 # self.network.proj=nn.Parameter(0.03608439182435161 * torch.randn(768, num_classes))
                 # self.network.proj==None
             else:
