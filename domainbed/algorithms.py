@@ -1285,6 +1285,9 @@ class Clip_train_mixup_with_text(Algorithm):
         self.cnt+=1
         return {'loss': loss.item()}
 
+    def update(self, minibatches, unlabeled=None):
+        return None
+
     def predict(self, x):
 
         image_features = self.featurizer.encode_image(x)
@@ -1311,16 +1314,14 @@ class zero_shot_eval(Algorithm):
     def __init__(self, input_shape, num_classes, num_domains, hparams):
         super(zero_shot_eval, self).__init__(input_shape, num_classes, num_domains,
                                   hparams)
+        fname="domainbed/outputs_clip/Clip_train_mixup_with_text_ft_uniform/DomainNet/lr-0.000005/8b31d5fe7af5f9673eb3c765c01c75b9/best_val_model_testdom_[3]_0.7366.pkl"
+        
+        model=load_model(fname)
 
-
-        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
+        self.featurizer = model.featurizer
         
         printNetworkParams(self.featurizer)
-        self.optimizer = torch.optim.AdamW(
-            list(self.featurizer.parameters()),
-            lr=self.hparams["lr"],
-            weight_decay=self.hparams['weight_decay']
-        )
+ 
         self.Class_names=misc.Class_names
         with torch.no_grad():
             text_inputs  = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
@@ -4660,3 +4661,15 @@ class IB_IRM(ERM):
 def printNetworkParams(net):
     pytorch_total_trainable_params = sum(p.numel() for p in net.parameters() if p.requires_grad)
     print("pytorch_total_trainable_params:",pytorch_total_trainable_params)
+
+
+def load_model(fname):
+    dump = torch.load(fname)
+    algorithm_class = get_algorithm_class(dump["args"]["algorithm"])
+    algorithm = algorithm_class(
+        dump["model_input_shape"],
+        dump["model_num_classes"],
+        dump["model_num_domains"],
+        dump["model_hparams"])
+    algorithm.load_state_dict(dump["model_dict"],strict=False)
+    return algorithm

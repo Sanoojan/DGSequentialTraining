@@ -75,6 +75,11 @@ if __name__ == "__main__":
     print('Args:')
     for k, v in sorted(vars(args).items()):
         print('\t{}: {}'.format(k, v))
+    
+    if(args.algorithm)=="zero_shot_eval":
+        zero_shot=True
+    else:
+        zero_shot=False
 
     if args.hparams_seed == 0:
         hparams = hparams_registry.default_hparams(args.algorithm, args.dataset)
@@ -224,6 +229,63 @@ if __name__ == "__main__":
     last_results_keys = None
     start_time=time.time()
     best_val_acc=0
+
+    if (zero_shot):
+        step_start_time = time.time()
+        minibatches_device = [(x.to(device), y.to(device))
+            for x,y in next(train_minibatches_iterator)]
+        if args.task == "domain_adaptation":
+            uda_device = [x.to(device)
+                for x,_ in next(uda_minibatches_iterator)]
+        else:
+            uda_device = None
+        # step_vals = algorithm.update(minibatches_device, uda_device)
+        checkpoint_vals['step_time'].append(time.time() - step_start_time)
+
+        # for key, val in step_vals.items():
+        #     checkpoint_vals[key].append(val)
+        step=0
+        if (step % checkpoint_freq == 0) or (step == n_steps - 1):
+            results = {
+                'step': step,
+                'epoch': step / steps_per_epoch,
+            }
+
+            for key, val in checkpoint_vals.items():
+                results[key] = np.mean(val)
+
+            evals = zip(eval_loader_names, eval_loaders, eval_weights)
+            for name, loader, weights in evals:
+                acc = misc.accuracy(algorithm, loader, weights, device)
+                results[name+'_acc'] = acc
+            
+            results['mem_gb'] = torch.cuda.max_memory_allocated() / (1024.*1024.*1024.)
+
+            results_keys = sorted(results.keys())
+            if results_keys != last_results_keys:
+                misc.print_row(results_keys, colwidth=12)
+                last_results_keys = results_keys
+            misc.print_row([results[key] for key in results_keys],
+                colwidth=12)
+       
+            results.update({
+                'hparams': hparams,
+                'args': vars(args)
+            })
+
+            epochs_path = os.path.join(args.output_dir, 'results.jsonl')
+            with open(epochs_path, 'a') as f:
+                f.write(json.dumps(results, sort_keys=True) + "\n")
+
+            start_step = step + 1
+            checkpoint_vals = collections.defaultdict(lambda: [])
+            stop_time=time.time()
+            print("Time taken to train: ",str((stop_time-start_time)/60.0)," minutes")
+            with open(os.path.join(args.output_dir, 'done'), 'w') as f:
+                f.write('done')
+            exit()
+
+
     for step in range(start_step, n_steps):
         step_start_time = time.time()
         minibatches_device = [(x.to(device), y.to(device))
