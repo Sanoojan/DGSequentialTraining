@@ -68,6 +68,8 @@ do
     done
 done
 
+
+# Mixup
 # for dataset in  DomainNet
 # do
 #     for lr in  0.000005 
