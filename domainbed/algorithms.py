@@ -1244,17 +1244,14 @@ class Clip_train_mixup_with_text(Algorithm):
         mixup_text_chunk=torch.chunk(mixup_text_feature,chunks=self.num_domains)
 
         bs=int(len(all_x)/self.num_domains)
-        ba=int(len(all_x))
         a=torch.rand(int(len(all_x)),self.num_domains)
         sum=torch.sum(a,dim=1,keepdims=True)
         a=(a*(1)/sum).to("cuda")
-        rand_perm=torch.randperm(ba)
-        mixup_features=torch.unsqueeze(a[:,0],dim=1).expand(-1,768)*mixup_features[rand_perm]
-        mixup_text_feature=torch.unsqueeze(a[:,0],dim=1).expand(-1,512)*mixup_text_feature[rand_perm]
+        mixup_features=torch.unsqueeze(a[:,0],dim=1).expand(-1,768)*mixup_features
+        mixup_text_feature=torch.unsqueeze(a[:,0],dim=1).expand(-1,512)*mixup_text_feature
         for d in range(1,self.num_domains):
-            rand_perm=torch.randperm(bs)
-            mixup_features+=torch.unsqueeze(a[:,d],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[(dom+d)%self.num_domains][rand_perm] for dom in range(self.num_domains)]),dim=0)
-            mixup_text_feature+=torch.unsqueeze(a[:,d],dim=1).expand(-1,512)*torch.cat(([mixup_text_chunk[(dom+d)%self.num_domains][rand_perm] for dom in range(self.num_domains)]),dim=0)
+            mixup_features+=torch.unsqueeze(a[:,d],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[(dom+d)%self.num_domains] for dom in range(self.num_domains)]),dim=0)
+            mixup_text_feature+=torch.unsqueeze(a[:,d],dim=1).expand(-1,512)*torch.cat(([mixup_text_chunk[(dom+d)%self.num_domains] for dom in range(self.num_domains)]),dim=0)
   
         
         text_features = self.text_features
@@ -1275,7 +1272,7 @@ class Clip_train_mixup_with_text(Algorithm):
 
         loss_i = F.cross_entropy(logits_per_image_mixup, labels)
         loss_t = F.cross_entropy(logits_per_text_mixup, labels)
-        loss = (loss_i + loss_t)/2
+        loss = (loss_i + loss_t)/1.0
     
         loss+=F.cross_entropy(logits_per_image, all_y)
 
