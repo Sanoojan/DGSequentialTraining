@@ -913,6 +913,7 @@ class Clip_train_text_freeze(Algorithm):
     """
     Empirical Risk Minimization (ERM)
     """
+
     
 
     def __init__(self, input_shape, num_classes, num_domains, hparams):
@@ -1226,7 +1227,7 @@ class Clip_train_mixup_with_text(Algorithm):
     def update(self, minibatches, unlabeled=None):
         all_x = torch.cat([x for x,y in minibatches])
         all_y = torch.cat([y for x,y in minibatches])
-   
+        # print(all_y)
         image_features = self.featurizer.encode_image(all_x)
         mixup_features=torch.clone(image_features)
 
@@ -1269,7 +1270,7 @@ class Clip_train_mixup_with_text(Algorithm):
         loss_t = F.cross_entropy(logits_per_text_mixup, labels)
         loss = (loss_i + loss_t)/1.0
     
-        loss+=F.cross_entropy(logits_per_image, all_y)
+        # loss+=F.cross_entropy(logits_per_image, all_y)
 
 
         self.optimizer.zero_grad()

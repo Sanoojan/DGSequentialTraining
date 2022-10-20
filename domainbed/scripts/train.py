@@ -109,6 +109,17 @@ if __name__ == "__main__":
             args.test_envs, hparams)
         misc.Class_names=dataset.Class_names
         num_classes=dataset.num_classes
+        if(heterogeneous_class):
+            num_select_cls=num_classes//2
+            classes_ind=list(range(num_classes))
+            select_classes=random.sample(classes_ind, num_select_cls)
+            eval_classes=list(set(classes_ind) - set(select_classes))
+            in_weights_sp = torch.tensor([1.0/(num_select_cls) if i in select_classes else 0 for i in classes_ind  ]).to("cuda")
+            out_weights_sp = torch.tensor([1.0/(num_classes-num_select_cls) if i in eval_classes else 0 for i in classes_ind  ]).to("cuda")
+            eval_weight_sp=[]
+            # in_weights_sp = torch.tensor([1.0/(num_select_cls) for i in classes_ind ]).to("cuda")
+            print("train_classes:",select_classes)
+            print("eval_classes:",out_weights_sp)
     else:
         raise NotImplementedError
 
@@ -127,14 +138,7 @@ if __name__ == "__main__":
     in_splits = []
     out_splits = []
     uda_splits = []
-    if(heterogeneous_class):
-        num_select_cls=num_classes//2
-        classes_ind=list(range(num_classes))
-        select_classes=random.sample(classes_ind, num_select_cls)
-        eval_classes=list(set(classes_ind) - set(select_classes))
-        in_weights_sp = torch.tensor([1.0/(num_select_cls) if i in select_classes else 0 for i in classes_ind  ]).to("cuda")
-        out_weights_sp = torch.tensor([1.0/(num_classes-num_select_cls) if i in eval_classes else 0 for i in classes_ind  ]).to("cuda")
-        print(in_weights_sp)
+    
     for env_i, env in enumerate(dataset):
         uda = []
 
@@ -151,19 +155,21 @@ if __name__ == "__main__":
             Classes=[y for _,y in in_]
             Classes=torch.tensor(Classes).to("cuda")
             if (env_i in args.test_envs):
-                
-                in_weights=torch.index_select(out_weights_sp, 0, Classes)
+                eval_weight_sp.append(out_weights_sp)
+                in_weights=torch.index_select(in_weights_sp, 0, Classes)
                 in_weights=in_weights/torch.sum(in_weights)
             else:
+                eval_weight_sp.append(in_weights_sp)
                 in_weights=torch.index_select(in_weights_sp, 0, Classes)
                 in_weights=in_weights/torch.sum(in_weights)
                 
             if (env_i in args.test_envs):
-                out_weights=out_weights_sp
+                out_weights=torch.index_select(in_weights_sp, 0, Classes)
+                out_weights=out_weights/torch.sum(in_weights)
             else:
-                out_weights =in_weights_sp
+                out_weights=torch.index_select(in_weights_sp, 0, Classes)
+                out_weights=out_weights/torch.sum(in_weights)
 
-         
             if uda is not None:
                 uda_weights = misc.make_weights_for_balanced_classes(uda)
         elif hparams['class_balanced']:
@@ -343,7 +349,7 @@ if __name__ == "__main__":
             temp_acc=0
             temp_count=0
             for name, loader, weights in evals:
-                acc = misc.accuracy(algorithm, loader, weights, device)
+                acc = misc.accuracy(algorithm, loader, weights, device,eval_weight_sp[int(name[3])])
                 if(args.save_best_model):
                     if (int(name[3]) not in args.test_envs and  "out" in name):
                         curr_train_env=name[3]
