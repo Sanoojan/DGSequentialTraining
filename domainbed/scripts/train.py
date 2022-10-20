@@ -119,7 +119,7 @@ if __name__ == "__main__":
             eval_weight_sp=[]
             # in_weights_sp = torch.tensor([1.0/(num_select_cls) for i in classes_ind ]).to("cuda")
             print("train_classes:",select_classes)
-            print("eval_classes:",out_weights_sp)
+            print("eval_classes:",eval_classes)
     else:
         raise NotImplementedError
 
