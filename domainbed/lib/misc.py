@@ -164,7 +164,9 @@ def accuracy(network, loader, weights, device):
             if weights is None:
                 batch_weights = torch.ones(len(x))
             else:
-                batch_weights = weights[weights_offset : weights_offset + len(x)]
+                weights=torch.tensor(weights).to(device)
+                # batch_weights = weights[weights_offset : weights_offset + len(x)]
+                batch_weights = torch.index_select(weights, 0, y)
                 weights_offset += len(x)
             batch_weights = batch_weights.to(device)
             if p.size(1) == 1:

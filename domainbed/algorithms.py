@@ -1207,14 +1207,7 @@ class Clip_train_mixup_with_text(Algorithm):
                                   hparams)
 
         self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
-        if(self.hparams['weight_init']=="clip_full"):
-            print("clip_full")
-            # self.featurizer.network.proj=None
-        # else:
-
-        #     self.featurizer.network.head=nn.Identity()
-
-        # self.network = nn.Sequential(self.featurizer, self.classifier)
+       
         printNetworkParams(self.featurizer)
         self.optimizer = torch.optim.AdamW(
             list(self.featurizer.parameters()),
@@ -1233,7 +1226,7 @@ class Clip_train_mixup_with_text(Algorithm):
     def update(self, minibatches, unlabeled=None):
         all_x = torch.cat([x for x,y in minibatches])
         all_y = torch.cat([y for x,y in minibatches])
-        
+   
         image_features = self.featurizer.encode_image(all_x)
         mixup_features=torch.clone(image_features)
 
@@ -1285,8 +1278,6 @@ class Clip_train_mixup_with_text(Algorithm):
         self.cnt+=1
         return {'loss': loss.item()}
 
-    def update(self, minibatches, unlabeled=None):
-        return None
 
     def predict(self, x):
 
@@ -1314,7 +1305,7 @@ class zero_shot_eval(Algorithm):
     def __init__(self, input_shape, num_classes, num_domains, hparams):
         super(zero_shot_eval, self).__init__(input_shape, num_classes, num_domains,
                                   hparams)
-        fname="domainbed/outputs_clip/Clip_train_mixup_with_text_ft_uniform/DomainNet/lr-0.000005/8b31d5fe7af5f9673eb3c765c01c75b9/best_val_model_testdom_[3]_0.7366.pkl"
+        fname="domainbed/outputs_clip/Clip_train_text_freeze/PACS/lr-0.000005/5552c5162ca27196b2b70e30b2dc84fe/best_val_model_testdom_[2]_0.9851.pkl"
         
         model=load_model(fname)
 
@@ -1330,6 +1321,8 @@ class zero_shot_eval(Algorithm):
         self.num_domains=num_domains
         # self.mixup_weight=0.6
 
+    def update(self, minibatches, unlabeled=None):
+        return None
 
     def predict(self, x):
 
