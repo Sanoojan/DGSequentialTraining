@@ -19,6 +19,9 @@ import tqdm
 from collections import Counter
 
 Class_names=[]
+Train_class_names=[]
+class_change=[]
+Test_class_names=[]
 
 def l2_between_dicts(dict_1, dict_2):
     assert len(dict_1) == len(dict_2)
@@ -161,12 +164,57 @@ def accuracy(network, loader, weights, device):
             x = x.to(device)
             y = y.to(device)
             p = network.predict(x)
+
+            # print("pred:",torch.argmax(p,dim=1))
+            # print(y)
+            # print("end")
+            # weights=None
             if weights is None:
                 batch_weights = torch.ones(len(x))
             else:
                 weights=torch.tensor(weights).to(device)
-                # batch_weights = weights[weights_offset : weights_offset + len(x)]
-                batch_weights = torch.index_select(weights, 0, y)
+                batch_weights = weights[weights_offset : weights_offset + len(x)]
+                # batch_weights = torch.index_select(weights, 0, y)
+                weights_offset += len(x)
+            batch_weights = batch_weights.to(device)
+            if p.size(1) == 1:
+                correct += (p.gt(0).eq(y).float() * batch_weights.view(-1, 1)).sum().item()
+            else:
+                correct += (p.argmax(1).eq(y).float() * batch_weights).sum().item()
+            total += batch_weights.sum().item()
+    network.train()
+
+    return correct / total
+
+def accuracy_2(network, loader, weights, device,eval_weight_sp):
+    correct = 0
+    total = 0
+    weights_offset = 0
+    if(eval_weight_sp is None):
+        weights=None
+    else:
+        eval_weight_sp=torch.tensor(eval_weight_sp).to(device)
+    network.eval()
+    with torch.no_grad():
+        for x, y in loader:
+            x = x.to(device)
+            y = y.to(device)
+            p = network.predict(x)
+            # print(y)
+            # print("pred:",torch.argmax(p,dim=1))
+            
+            
+            
+            # weights=None
+            if weights is None:
+                batch_weights = torch.ones(len(x))
+            else:
+                weights=torch.index_select(eval_weight_sp, 0, y)
+                batch_weights = weights
+                # print(batch_weights)
+                # print((batch_weights != 0).nonzero().unsqueeze(0))
+                # print("end")
+                # batch_weights = torch.index_select(weights, 0, y)
                 weights_offset += len(x)
             batch_weights = batch_weights.to(device)
             if p.size(1) == 1:

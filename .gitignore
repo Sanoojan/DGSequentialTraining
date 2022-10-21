@@ -7,7 +7,7 @@ domainbed/outputs/
 Outs/
 sweep.sh
 slurm*
-*.sh
+
 
 domainbed/outputs_new/
 domainbed/pretrained/dino/dino_vitbase16_pretrain.pth
@@ -24,4 +24,3 @@ domainbed/pretrained/
 domainbed/tsneOuts/
 img_outs/
 domainbed/outputs_clip/
-output.*.txt
