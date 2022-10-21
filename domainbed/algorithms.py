@@ -94,8 +94,8 @@ class ERM(Algorithm):
     def __init__(self, input_shape, num_classes, num_domains, hparams):
         super(ERM, self).__init__(input_shape, num_classes, num_domains,
                                   hparams)
-        # self.featurizer = networks.Featurizer(input_shape, self.hparams)
-        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes)
+        self.featurizer = networks.Featurizer(input_shape, self.hparams)
+        # self.featurizer = networks.ViT(input_shape, self.hparams,num_classes)
         self.classifier = networks.Classifier(
             self.featurizer.n_outputs,
             num_classes,
@@ -173,15 +173,10 @@ class ERM_with_clip(Algorithm):
         self.network.fc = nn.Identity()
 
         self.vis_proj = torch.nn.Linear(2048, 512)
-        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
-        if(self.hparams['weight_init']=="clip_scratch"):
-            print("clip_full")
-            # self.featurizer.network.proj=None
-        # else:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model, preprocess = clip.load('ViT-B/16', device)
+        self.featurizer=model.float()
 
-        #     self.featurizer.network.head=nn.Identity()
-
-        # self.network = nn.Sequential(self.featurizer, self.classifier)
         printNetworkParams(self.featurizer)
         self.optimizer = torch.optim.AdamW(
             list(self.network.parameters())+list(self.featurizer.visual.parameters())+list(self.vis_proj.parameters()),
@@ -252,7 +247,10 @@ class ERM_with_text_mix(Algorithm):
         self.network.fc = nn.Identity()
 
         self.vis_proj = torch.nn.Linear(2048, 512)
-        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model, preprocess = clip.load('ViT-B/16', device)
+        # model=model.float()
+        self.featurizer=model.float()
         if(self.hparams['weight_init']=="clip_scratch"):
             print("clip_full")
             # self.featurizer.network.proj=None
@@ -1794,7 +1792,7 @@ class VREx(ERM):
                 'penalty': penalty.item()}
 
 
-class Mixup(ERM):
+class Mixup(Algorithm):
     """
     Mixup of minibatches from different domains
     https://arxiv.org/pdf/2001.00677.pdf
@@ -1802,8 +1800,22 @@ class Mixup(ERM):
     """
     def __init__(self, input_shape, num_classes, num_domains, hparams):
         super(Mixup, self).__init__(input_shape, num_classes, num_domains,
-                                    hparams)
+                                  hparams)
+        # self.featurizer = networks.Featurizer(input_shape, self.hparams)
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes)
+        self.classifier = networks.Classifier(
+            self.featurizer.n_outputs,
+            num_classes,
+            self.hparams['nonlinear_classifier'],init=self.hparams['weight_init'])
 
+        self.network = nn.Sequential(self.featurizer, self.classifier)
+        # print(self.network)
+        printNetworkParams(self.network)
+        self.optimizer = torch.optim.Adam(
+            self.network.parameters(),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
     def update(self, minibatches, unlabeled=None):
         objective = 0
 
@@ -1824,6 +1836,8 @@ class Mixup(ERM):
         self.optimizer.step()
 
         return {'loss': objective.item()}
+    def predict(self, x):
+        return self.network(x)
 
 
 class GroupDRO(ERM):
