@@ -24,3 +24,4 @@ domainbed/pretrained/
 domainbed/tsneOuts/
 img_outs/
 domainbed/outputs_clip/
+output.*.txt
