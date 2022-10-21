@@ -19,6 +19,9 @@ import tqdm
 from collections import Counter
 
 Class_names=[]
+Train_class_names=[]
+class_change=[]
+Test_class_names=[]
 
 def l2_between_dicts(dict_1, dict_2):
     assert len(dict_1) == len(dict_2)
@@ -162,7 +165,7 @@ def accuracy(network, loader, weights, device):
             y = y.to(device)
             p = network.predict(x)
 
-            print("pred:",torch.argmax(p,dim=1))
+            # print("pred:",torch.argmax(p,dim=1))
             # print(y)
             # print("end")
             # weights=None
@@ -183,7 +186,7 @@ def accuracy(network, loader, weights, device):
 
     return correct / total
 
-def accuracy(network, loader, weights, device,eval_weight_sp):
+def accuracy_2(network, loader, weights, device,eval_weight_sp):
     correct = 0
     total = 0
     weights_offset = 0

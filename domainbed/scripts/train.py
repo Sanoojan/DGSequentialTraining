@@ -51,7 +51,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_model_every_checkpoint', action='store_true')
     parser.add_argument('--save_best_model', action='store_true')
     args = parser.parse_args()
-    heterogeneous_class=True
+    heterogeneous_class=False
     args.save_best_model=True
     # If we ever want to implement checkpointing, just persist these values
     # every once in a while, and then load them from disk here.
@@ -109,6 +109,7 @@ if __name__ == "__main__":
             args.test_envs, hparams)
         misc.Class_names=dataset.Class_names
         num_classes=dataset.num_classes
+        misc.Train_class_names=misc.Class_names
         if(heterogeneous_class):
             num_select_cls=num_classes//2
             classes_ind=list(range(num_classes))
@@ -117,6 +118,18 @@ if __name__ == "__main__":
             in_weights_sp = torch.tensor([1.0/(num_select_cls) if i in select_classes else 0 for i in classes_ind  ]).to("cuda")
             out_weights_sp = torch.tensor([1.0/(num_classes-num_select_cls) if i in eval_classes else 0 for i in classes_ind  ]).to("cuda")
             eval_weight_sp=[]
+            misc.Train_class_names=[misc.Class_names[i] for i in sorted(select_classes)]
+            misc.Test_class_names=[misc.Class_names[i] for i in sorted(select_classes)]
+            k=[]
+            vl=0
+            for i in range(num_classes):
+                if(i in select_classes):
+                    k.append(vl)
+                    vl+=1
+                else:
+                    k.append(-1)
+            misc.class_change=torch.tensor(k) 
+            # print(Train_class_names)
             # in_weights_sp = torch.tensor([1.0/(num_select_cls) for i in classes_ind ]).to("cuda")
             print("train_classes:",select_classes)
             print("eval_classes:",eval_classes)
@@ -265,60 +278,60 @@ if __name__ == "__main__":
     start_time=time.time()
     best_val_acc=0
 
-    # if (zero_shot):
-    #     step_start_time = time.time()
-    #     minibatches_device = [(x.to(device), y.to(device))
-    #         for x,y in next(train_minibatches_iterator)]
-    #     if args.task == "domain_adaptation":
-    #         uda_device = [x.to(device)
-    #             for x,_ in next(uda_minibatches_iterator)]
-    #     else:
-    #         uda_device = None
-    #     # step_vals = algorithm.update(minibatches_device, uda_device)
-    #     checkpoint_vals['step_time'].append(time.time() - step_start_time)
+    if (zero_shot):
+        step_start_time = time.time()
+        minibatches_device = [(x.to(device), y.to(device))
+            for x,y in next(train_minibatches_iterator)]
+        if args.task == "domain_adaptation":
+            uda_device = [x.to(device)
+                for x,_ in next(uda_minibatches_iterator)]
+        else:
+            uda_device = None
+        # step_vals = algorithm.update(minibatches_device, uda_device)
+        checkpoint_vals['step_time'].append(time.time() - step_start_time)
 
-    #     # for key, val in step_vals.items():
-    #     #     checkpoint_vals[key].append(val)
-    #     step=0
-    #     if (step % checkpoint_freq == 0) or (step == n_steps - 1):
-    #         results = {
-    #             'step': step,
-    #             'epoch': step / steps_per_epoch,
-    #         }
+        # for key, val in step_vals.items():
+        #     checkpoint_vals[key].append(val)
+        step=0
+        if (step % checkpoint_freq == 0) or (step == n_steps - 1):
+            results = {
+                'step': step,
+                'epoch': step / steps_per_epoch,
+            }
 
-    #         for key, val in checkpoint_vals.items():
-    #             results[key] = np.mean(val)
+            for key, val in checkpoint_vals.items():
+                results[key] = np.mean(val)
 
-    #         evals = zip(eval_loader_names, eval_loaders, eval_weights)
-    #         for name, loader, weights in evals:
-    #             acc = misc.accuracy(algorithm, loader, weights, device)
-    #             results[name+'_acc'] = acc
+            evals = zip(eval_loader_names, eval_loaders, eval_weights)
+            for name, loader, weights in evals:
+                acc = misc.accuracy(algorithm, loader, weights, device)
+                results[name+'_acc'] = acc
             
-    #         results['mem_gb'] = torch.cuda.max_memory_allocated() / (1024.*1024.*1024.)
+            results['mem_gb'] = torch.cuda.max_memory_allocated() / (1024.*1024.*1024.)
 
-    #         results_keys = sorted(results.keys())
-    #         if results_keys != last_results_keys:
-    #             misc.print_row(results_keys, colwidth=12)
-    #             last_results_keys = results_keys
-    #         misc.print_row([results[key] for key in results_keys],
-    #             colwidth=12)
+            results_keys = sorted(results.keys())
+            if results_keys != last_results_keys:
+                misc.print_row(results_keys, colwidth=12)
+                last_results_keys = results_keys
+            misc.print_row([results[key] for key in results_keys],
+                colwidth=12)
        
-    #         results.update({
-    #             'hparams': hparams,
-    #             'args': vars(args)
-    #         })
+            results.update({
+                'hparams': hparams,
+                'args': vars(args)
+            })
 
-    #         epochs_path = os.path.join(args.output_dir, 'results.jsonl')
-    #         with open(epochs_path, 'a') as f:
-    #             f.write(json.dumps(results, sort_keys=True) + "\n")
+            epochs_path = os.path.join(args.output_dir, 'results.jsonl')
+            with open(epochs_path, 'a') as f:
+                f.write(json.dumps(results, sort_keys=True) + "\n")
 
-    #         start_step = step + 1
-    #         checkpoint_vals = collections.defaultdict(lambda: [])
-    #         stop_time=time.time()
-    #         print("Time taken to train: ",str((stop_time-start_time)/60.0)," minutes")
-    #         with open(os.path.join(args.output_dir, 'done'), 'w') as f:
-    #             f.write('done')
-    #         exit()
+            start_step = step + 1
+            checkpoint_vals = collections.defaultdict(lambda: [])
+            stop_time=time.time()
+            print("Time taken to train: ",str((stop_time-start_time)/60.0)," minutes")
+            with open(os.path.join(args.output_dir, 'done'), 'w') as f:
+                f.write('done')
+            exit()
 
 
     for step in range(start_step, n_steps):
@@ -349,7 +362,7 @@ if __name__ == "__main__":
             temp_acc=0
             temp_count=0
             for name, loader, weights in evals:
-                acc = misc.accuracy(algorithm, loader, weights, device,eval_weight_sp[int(name[3])])
+                acc = misc.accuracy(algorithm, loader, weights, device)
                 if(args.save_best_model):
                     if (int(name[3]) not in args.test_envs and  "out" in name):
                         curr_train_env=name[3]
