@@ -1440,7 +1440,7 @@ class DPLCLIP(CLIP):
         # print(all_y)
         # all_y= torch.cat([data[1].cuda().long() for data in minibatches]) ##########Edited
         #  encode image for each domain.
-        image_features = [self.clip_model.encode_image(x) for x in all_x]
+        image_features = [self.clip_model.encode_image(x) @ self.clip_model.visual.proj  for x in all_x]
         
         #  extract domain_feature for each domain. [32, self.EMBEDDING_DIM] -> [32, self.EMBEDDING_DIM * num_domain_tokens] -> [self.EMBEDDING_DIM * num_domain_tokens].
         domain_features = [self.network(feature) for feature in image_features]
@@ -1489,7 +1489,7 @@ class DPLCLIP(CLIP):
         return text_features
 
     def predict(self, x):
-        image_feature = self.clip_model.encode_image(x)
+        image_feature = self.clip_model.encode_image(x) @ self.clip_model.visual.proj
         
         domain_feature = self.network(image_feature)
         mean_domain_feature = torch.mean(domain_feature, dim=0, keepdim=True).repeat_interleave(len(self.Class_names), dim=0)
@@ -1499,7 +1499,157 @@ class DPLCLIP(CLIP):
         text_feature = text_feature / text_feature.norm(dim=-1, keepdim=True)
         return self.clip_model.logit_scale.exp() * image_feature @ text_feature.t()
 
+class DPLCLIP_mixup_with_text(CLIP):
+    def __init__(self, input_shape, num_classes, num_domains, hparams, sentence_prompt=True):
+        super(DPLCLIP_mixup_with_text, self).__init__(input_shape, num_classes, num_domains, hparams)
 
+        #  initial prompt.
+        prompt_prefix = ' '.join(['X'] * hparams['num_domain_tokens'])
+        self.Class_names=misc.Class_names
+        if sentence_prompt:
+            print('Using sentence_prompt in DPLCLIP...')
+            classnames = [f"a photo of a {name.replace('_', ' ')}" for name in self.Class_names]
+        else:
+            classnames = [name.replace('_', ' ') for name in self.Class_names]
+        prompts = [prompt_prefix + ' ' + name + '.' for name in classnames]
+        # prompts:  ['X X X X X X X X dog.', 'X X X X X X X X elephant.' ...]
+        
+        #  to get default token_prefix and token_suffix.
+        self.tokenized_prompts = torch.cat([clip.tokenize(p) for p in prompts]).to(self.device)
+        # tokenized_prompts[0] = tensor([49406,   343,   343,   343,   343,   343,   343,   343,   343,  1929, 269, 49407, 0, 0, ...])
+        with torch.no_grad():
+            embedding = self.clip_model.token_embedding(self.tokenized_prompts).type(self.clip_model.dtype)
+        
+        self.register_buffer('token_prefix', embedding[:, :1, :])  # SOS
+        #  torch.Size([7, 1, 512])
+        #  [-0.0001,  0.0002, -0.0046,  ...,  0.0010,  0.0025,  0.0049]
+        
+        self.register_buffer('token_suffix', embedding[:, hparams['num_domain_tokens'] + 1:, :])  # CLS, EOS
+        # torch.Size([7, 68, self.EMBEDDING_DIM]), 68 := 77 - num_domain_tokens_tokens - 2.
+        # [ 0.0013,  0.0046, -0.0115,  ...,  0.0112,  0.0147,  0.0040],...,.
+        
+        self.network = networks.MLP(self.EMBEDDING_DIM, self.EMBEDDING_DIM * hparams['num_domain_tokens'], hparams).to(device=self.device, dtype=self.clip_model.dtype)
+        
+        def init_weights(m):
+            if isinstance(m, nn.Linear):
+                torch.nn.init.xavier_uniform(m.weight)
+                m.bias.data.fill_(0.01)
+        
+        self.network.apply(init_weights)
+        self.num_domains=num_domains
+        self.optimizer = torch.optim.SGD(
+            self.network.parameters(),
+            lr=self.hparams["lr"],
+            momentum=self.hparams["momentum"]
+        )
+            
+    def update(self, minibatches, unlabeled=None):
+            # minibatches = [[domain_1], [domain_2], [domain_3]]
+        all_x = [data[0].cuda().float() for data in minibatches]
+
+        ##########Edited
+        all_y = torch.cat([data[1].cuda().long() for data in minibatches])
+        label_chunks=torch.chunk(all_y,chunks=self.num_domains,dim=0)
+        all_y =[[len(self.Class_names)*i+y for y in label_chunks[i]] for i in range(self.num_domains)]
+        all_y=torch.tensor(list(itertools.chain.from_iterable(all_y))).cuda().long()
+        # print(all_y)
+        # all_y= torch.cat([data[1].cuda().long() for data in minibatches]) ##########Edited
+        #  encode image for each domain.
+        image_features = [self.clip_model.encode_image(x) @ self.clip_model.visual.proj  for x in all_x]
+        
+        #  extract domain_feature for each domain. [32, self.EMBEDDING_DIM] -> [32, self.EMBEDDING_DIM * num_domain_tokens] -> [self.EMBEDDING_DIM * num_domain_tokens].
+        domain_features = [self.network(feature) for feature in image_features]
+        image_features = torch.cat(image_features)
+        #  reshape [self.batch_size, self.EMBEDDING_DIM.]:  -> [1, self.EMBEDDING_DIM.]
+        mean_domain_features = [feature.mean(dim=0, keepdim=True) for feature in domain_features]
+
+        #  reshape [1, self.EMBEDDING_DIM.]:  -> [7, self.EMBEDDING_DIM.]
+        _mean_domain_features = [feature.repeat_interleave(len(self.Class_names), dim=0) for feature in mean_domain_features]
+        
+        #  generate text_feature from domain_feature. text_features.size = [3, 7, 512]
+        # text_features = [self._get_text_features(feature) for feature in _mean_domain_features]
+        text_features = torch.cat([self._get_text_features(feature) for feature in _mean_domain_features])
+        ################################################################
+        
+        mixup_features=torch.clone(image_features)
+
+        mixup_features_chunk=torch.chunk(mixup_features,chunks=self.num_domains)
+        mixup_text_feature=torch.index_select(text_features, 0, all_y)
+        mixup_text_chunk=torch.chunk(mixup_text_feature,chunks=self.num_domains)
+
+        a=torch.rand(int(len(image_features)),self.num_domains)
+
+        sum=torch.sum(a,dim=1,keepdims=True)
+        a=(a*(1)/sum).to("cuda")
+       
+        mixup_features=torch.unsqueeze(a[:,0],dim=1).expand(-1,512)*mixup_features
+        mixup_text_feature=torch.unsqueeze(a[:,0],dim=1).expand(-1,512)*mixup_text_feature
+        for d in range(1,self.num_domains):
+            mixup_features+=torch.unsqueeze(a[:,d],dim=1).expand(-1,512)*torch.cat(([mixup_features_chunk[(dom+d)%self.num_domains] for dom in range(self.num_domains)]),dim=0)
+            mixup_text_feature+=torch.unsqueeze(a[:,d],dim=1).expand(-1,512)*torch.cat(([mixup_text_chunk[(dom+d)%self.num_domains] for dom in range(self.num_domains)]),dim=0)
+  
+    
+     
+        # mixup_features=mixup_features @ self.featurizer.visual.proj
+        mixup_features = mixup_features / mixup_features.norm(dim=1, keepdim=True)
+        mixup_text_feature = mixup_text_feature / mixup_text_feature.norm(dim=1, keepdim=True)
+        logit_scale = self.clip_model.logit_scale.exp()
+
+        logits_per_image_mixup=logit_scale * mixup_features @ mixup_text_feature.t()
+        logits_per_text_mixup = logits_per_image_mixup.t()
+        
+        labels = torch.tensor(np.arange(len(image_features))).to("cuda")
+
+        loss_i = F.cross_entropy(logits_per_image_mixup, labels)
+        loss_t = F.cross_entropy(logits_per_text_mixup, labels)
+        loss = (loss_i + loss_t)/2.0
+
+        ##############################################################
+
+
+        image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+        logits_per_image = self.clip_model.logit_scale.exp() * image_features @ text_features.t()
+        # print(logits_per_image.shape)
+        # print(all_y)
+        loss += F.cross_entropy(logits_per_image, all_y)
+            
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        return {"loss": loss.item()}
+
+
+
+
+    def _get_text_features(self, domain_feature, coop=False):
+        #  reshape domain_feature: [7, 16 * self.EMBEDDING_DIM] -> [7, 16, self.EMBEDDING_DIM]
+        domain_feature = domain_feature.reshape(-1, self.hparams['num_domain_tokens'], self.EMBEDDING_DIM)
+        
+        #  reshape domain_feature: [7, 16, self.EMBEDDING_DIM] -> [7, 77, self.EMBEDDING_DIM]
+        domain_feature = torch.cat([self.token_prefix, domain_feature, self.token_suffix], dim=1)
+        
+        #  refer CoOp: CoOP github. https://github.com/KaiyangZhou/CoOp/blob/b0a058869cef00a4e4ea5256d40fd7681119c099/trainers/coop.py#L46
+        x = domain_feature + self.clip_model.positional_embedding.type(self.clip_model.dtype)
+        x = x.permute(1, 0, 2)
+        x = self.clip_model.transformer(x)
+        x = x.permute(1, 0, 2)
+        x = self.clip_model.ln_final(x).type(self.clip_model.dtype)
+        
+        #  mapping domain_features to text_features.
+        text_features = x[torch.arange(x.shape[0]), self.tokenized_prompts.argmax(dim=-1)] @ self.clip_model.text_projection      
+        return text_features
+
+    def predict(self, x):
+        image_feature = self.clip_model.encode_image(x) @ self.clip_model.visual.proj
+        
+        domain_feature = self.network(image_feature)
+        mean_domain_feature = torch.mean(domain_feature, dim=0, keepdim=True).repeat_interleave(len(self.Class_names), dim=0)
+        text_feature = self._get_text_features(mean_domain_feature)
+        
+        image_feature = image_feature / image_feature.norm(dim=-1, keepdim=True)
+        text_feature = text_feature / text_feature.norm(dim=-1, keepdim=True)
+        return self.clip_model.logit_scale.exp() * image_feature @ text_feature.t()
 
 class Fish(Algorithm):
     """

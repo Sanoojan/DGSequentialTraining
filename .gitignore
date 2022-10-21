@@ -27,3 +27,4 @@ domainbed/outputs_clip/
 sweep_2.sh
 sweep-xavier.sh
 sweep.sh
+SweepDGX.sh
