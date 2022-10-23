@@ -412,6 +412,7 @@ class ERM_with_clip_mix(ERM_with_text_mix):
         self.cnt+=1
         return {'loss': loss.item()}
 
+
     
 
 class ERM_ViT_mixup(Algorithm):
@@ -650,6 +651,68 @@ class ERM_ViT_with_text_mix(Algorithm):
         logits_per_image = logit_scale * image_features @ text_features.t()
         
         return logits_per_image
+
+
+class ERM_Vit_with_clip_mix(ERM_ViT_with_text_mix):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+    
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_with_clip_mix, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        
+        self.mixup_weight=0.6
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        
+        image_features = self.network(all_x)
+        mixup_features=torch.clone(image_features)
+
+        mixup_features_chunk=torch.chunk(mixup_features,chunks=self.num_domains)
+        
+        
+        a=torch.rand(int(len(all_x)),self.num_domains-1)
+        sum=torch.sum(a,dim=1,keepdims=True)
+        a=(a*(1-self.mixup_weight)/sum).to("cuda")
+        mixup_features=self.mixup_weight*mixup_features
+     
+        for d in range(1,self.num_domains):
+
+            mixup_features+=torch.unsqueeze(a[:,d-1],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[(dom+d)%self.num_domains]for dom in range(self.num_domains)]),dim=0)
+           
+        # image_features=torch.cat((image_features,mixup_features),dim=0)
+        # all_y_full=torch.cat((all_y_full,all_y),dim=0)
+
+        
+       
+            # mixup_text_feature=self.featurizer.encode_text(mixup_text,no_embed=True,EOS_pos=EOS_pos)
+        image_features = self.vis_proj(image_features)
+        mixup_features= self.vis_proj(mixup_features)
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        mixup_features = mixup_features / mixup_features.norm(dim=1, keepdim=True)
+
+        text_features = self.text_features / self.text_features.norm(dim=1, keepdim=True)
+    
+        logit_scale = self.featurizer.logit_scale.exp()
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        logits_per_image_mixup = logit_scale * mixup_features @ text_features.t()
+        
+        loss = F.cross_entropy(logits_per_image_mixup, all_y)
+    
+        loss+=F.cross_entropy(logits_per_image, all_y)
+
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+        return {'loss': loss.item()}
 
 class ERM_ViT_classifier_learning(Algorithm):
     """
