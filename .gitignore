@@ -29,3 +29,4 @@ sweep-xavier.sh
 sweep.sh
 SweepDGX.sh
 output.*.txt
+TSNE/
