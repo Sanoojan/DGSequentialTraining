@@ -660,7 +660,7 @@ class ERM_Vit_with_clip_mix(ERM_ViT_with_text_mix):
     
 
     def __init__(self, input_shape, num_classes, num_domains, hparams):
-        super(ERM_with_clip_mix, self).__init__(input_shape, num_classes, num_domains,
+        super(ERM_Vit_with_clip_mix, self).__init__(input_shape, num_classes, num_domains,
                                   hparams)
 
         
@@ -691,8 +691,8 @@ class ERM_Vit_with_clip_mix(ERM_ViT_with_text_mix):
         
        
             # mixup_text_feature=self.featurizer.encode_text(mixup_text,no_embed=True,EOS_pos=EOS_pos)
-        image_features = self.vis_proj(image_features)
-        mixup_features= self.vis_proj(mixup_features)
+        image_features = image_features @ self.featurizer.visual.proj
+        mixup_features= mixup_features @ self.featurizer.visual.proj
         image_features = image_features / image_features.norm(dim=1, keepdim=True)
         mixup_features = mixup_features / mixup_features.norm(dim=1, keepdim=True)
 

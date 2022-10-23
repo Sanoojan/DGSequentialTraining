@@ -131,7 +131,6 @@ def make_args_list(n_trials, dataset_names, algorithms, n_hparams_from, n_hparam
                         train_args['hparams_seed'] = hparams_seed
                         train_args['data_dir'] = data_dir
                         train_args['task'] = task
-                        train_args['backbone']=backbone
                         train_args['trial_seed'] = trial_seed
                         train_args['seed'] = misc.seed_hash(dataset,
                             algorithm, test_envs, hparams_seed, trial_seed)

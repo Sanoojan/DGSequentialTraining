@@ -240,6 +240,66 @@ class Tee:
         self.stdout.flush()
         self.file.flush()
 
+def TsneFeatures(network, loader, weights, device, output_dir, env_name, algo_name,polar=False):
+     
+
+    correct = 0
+    total = 0
+    weights_offset = 0
+    network.eval()
+    Features=[]
+    Features2=[]
+    labels=[]
+    if algo_name is None:
+        algo_name = type(network).__name__
+    try:
+        Transnetwork = network.featurizer
+    except:
+        Transnetwork = network.network_original
+    with torch.no_grad():
+        for x, y in loader:
+            x = x.to(device)
+            y = y.to(device)
+
+            # p,x_dist,cls_feat,dist_feat = Transnetwork(x,return_cls_dist_feat=True) #MDT
+            image_features = Transnetwork.encode_image(x) @ Transnetwork.visual.proj # vit
+            if(polar):
+                text_features = network.text_features
+                image_features = image_features / image_features.norm(dim=1, keepdim=True)
+                text_features = text_features / text_features.norm(dim=1, keepdim=True)
+                logit_scale = network.featurizer.logit_scale.exp()
+                angles = logit_scale * image_features @ text_features.t()
+                angles=angles/torch.sum(angles,dim=1,keepdim=True)
+                # print(angles)
+                Features.append(angles)
+            else:
+                Features.append(image_features)
+            # Features.append(di_feat)
+            # Features2.append(DI)
+            labels.append(y)
+
+            
+
+    network.train()
+    labels=torch.cat(labels).cpu().detach().numpy()
+    # Features_all=[[] for _ in range(12)]
+    # for i in range(len(Features)):
+
+    #     Features_all[i]=torch.cat(Features[i],dim=0).cpu().detach().numpy()
+ 
+    print(labels.shape)
+    Features=torch.cat(Features,dim=0).cpu().detach().numpy()
+    # Features2=torch.cat(Features2,dim=0).cpu().detach().numpy()
+    # Features=np.concatenate((Features,Features2),axis=0)
+    # print(Features.shape)
+    name_conv=env_name
+
+    # print(y)
+    # print(len(y))
+    # print(len(Features))
+    # print(Features[0].shape)
+    return Features,labels
+
 class ParamDict(OrderedDict):
     """Code adapted from https://github.com/Alok/rl_implementations/tree/master/reptile.
     A dictionary where the values are Tensors, meant to represent weights of

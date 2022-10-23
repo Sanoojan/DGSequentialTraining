@@ -43,14 +43,36 @@ def load_model(fname):
     algorithm.load_state_dict(dump["model_dict"],strict=True)
     return algorithm
 
+def polar_features():
+    
+
+    N = 80
+    bottom = 8
+    max_height = 4
+
+    theta = np.linspace(0.0, 2 * np.pi, N, endpoint=False)
+    radii = max_height*np.random.rand(N)
+    width = (2*np.pi) / N
+
+    ax = plt.subplot(111, polar=True)
+    bars = ax.bar(theta, radii, width=width, bottom=bottom)
+
+    # Use custom colors and opacity
+    for r, bar in zip(radii, bars):
+        bar.set_facecolor(plt.cm.jet(r / 10.))
+        bar.set_alpha(0.8)
+
+    plt.show()
+
+
 def plot_features(features, labels, num_classes,filename):
     """Plot features on 2D plane.
     Args:
         features: (num_instances, num_features).
         labels: (num_instances).
     """
-    colors = ['C0', 'C1', 'C2', 'C3', 'C8', 'C5', 'C6']
-    class_names=['Dog','Elephant','Giraffe','Guitar','Horse','House','Person']
+    colors = ['C0', 'C1', 'C2', 'C3', 'C8', 'C5', 'C6','C7','C9','C4']
+    class_names=misc.Class_names
     if num_classes<=4:
         colors=[ 'C0', 'C1', 'C3','C8']
         class_names=['Art','Cartoon','Photo','Sketch']
@@ -97,7 +119,7 @@ def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
     ax.spines['left'].set_visible(False)
  
     labelscls=labels%10
-    plot_features(X_tsne, labelscls, 7,os.path.join(tsneOut_dir,"01clswise"+filename))
+    plot_features(X_tsne, labelscls, len(misc.Class_names),os.path.join(tsneOut_dir,"01clswise"+filename))
 
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.spines['top'].set_visible(False)
@@ -144,7 +166,8 @@ if __name__ == "__main__":
     parser.add_argument('--accuracy', type=bool, default=False)
     parser.add_argument('--tsne', type=bool, default=False)
     parser.add_argument('--flatness', type=bool, default=False)
-    parser.add_argument('--tsneOut_dir', type=str, default="./domainbed/tsneOuts/DIT_deit_small_di_train")
+    parser.add_argument('--polar', type=bool, default=True)
+    parser.add_argument('--tsneOut_dir', type=str, default="./domainbed/tsneOuts/clip_train")
     args = parser.parse_args()
     heterogeneous_class=False
     if(args.pretrained==None):
@@ -384,13 +407,40 @@ if __name__ == "__main__":
             acc = misc.accuracy(algorithm, loader, weights, device)
             # print(algo_name,":",name,":",acc)
             results[name+'_acc'] = acc
+        elif(args.polar):
+            # if(int(name[3]) not in args.test_envs and  "in" in name ):
+            #     continue
+            # if(int(name[3]) in args.test_envs  and  "out" in name ):
+            #     continue
+            # if(int(name[3]) in args.test_envs ):
+            #     continue
+            print(name)
+            Features,labels=misc.TsneFeatures(algorithm, loader, weights, device,args.output_dir,env_name,algo_name,polar=True)
+            
+            with open("tsne/TSVS/records_"+name_conv+"_blk_"+".tsv", "a") as record_file:
+                for i in range(len(labels)):
+                   
+                    Features_all.append(Features[i])
+                    for j in range(len(Features[i])):
+                        
+                        record_file.write(str(Features[i][j]))
+                        record_file.write("\t")
+                    record_file.write("\n")
+         
+            with open("tsne/TSVS/meta_"+name_conv+".tsv", "a") as record_file:
+                for i in range(len(labels)):
+                
+                    labels_all.append(int(str(env_name[-1])+str(labels[i])))
+                    tokenlabels.append("DS") if i<len(labels)/2 else tokenlabels.append("DI")
+                    record_file.write(str(labels[i]))
+                    record_file.write("\n")
         elif(args.tsne):
             # if(int(name[3]) not in args.test_envs and  "in" in name ):
             #     continue
             # if(int(name[3]) in args.test_envs  and  "out" in name ):
             #     continue
-            if(int(name[3]) in args.test_envs ):
-                continue
+            # if(int(name[3]) in args.test_envs ):
+            #     continue
             print(name)
             Features,labels=misc.TsneFeatures(algorithm, loader, weights, device,args.output_dir,env_name,algo_name)
             
@@ -522,7 +572,7 @@ if __name__ == "__main__":
     algorithm_dict = algorithm.state_dict()
 
     checkpoint_vals = collections.defaultdict(lambda: [])
-    if(args.tsne):
+    if(args.tsne or args.polar):
         visualizeEd(Features_all, labels_all,tokenlabels,name_conv+".jpg",args.tsneOut_dir)
       
 
