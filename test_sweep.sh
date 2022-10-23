@@ -5,19 +5,32 @@
 
 python -m domainbed.scripts.test_sweep launch\
     --data_dir=/share/data/drive_2/DG/data \
-    --output_dir=./domainbed/outputs_new/PACS/DI_tokening-vit-head/Deitsmall-sweep \
-    --command_launcher multi_gpu\
-    --algorithms DI_tokening_vit\
-    --backbone "DeitSmall" \
-    --single_test_envs \
+    --output_dir=./domainbed/outputs_clip/Clip_train_text_freeze \
+    --command_launcher gpu_4\
+    --algorithms Clip_train_text_freeze\
     --test_robustness False\
+    --single_test_envs \
     --accuracy True\
-    --tsneOut_dir=./domainbed/tsneOuts/DIT_deit_small_cls_test_all \
+    --tsneOut_dir=./domainbed/tsneOuts/check \
     --datasets PACS \
-    --n_hparams 10  \
+    --n_hparams 1  \
     --n_trials 3 \
-    --hparams """{\"attn_sep_mask\":1,\"num_class_select\":4,\"batch_size\":32}""" 
+    --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
 
+
+# python -m domainbed.scripts.test_sweep launch\
+#     --data_dir=/share/data/drive_2/DG/data \
+#     --output_dir=./domainbed/outputs_clip/Clip_train_text_freeze \
+#     --command_launcher gpu_4\
+#     --algorithms Clip_train_text_freeze\
+#     --single_test_envs \
+#     --test_robustness False\
+#     --accuracy True\
+#     --tsneOut_dir=./domainbed/tsneOuts/DIT_deit_small_cls_test_all \
+#     --datasets PACS \
+#     --n_hparams 10  \
+#     --n_trials 3 \
+#     --hparams """{\"attn_sep_mask\":1,\"num_class_select\":4,\"batch_size\":32}""" 
 
 # for trials in 0 1 2
 # do

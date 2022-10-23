@@ -141,11 +141,12 @@ if __name__ == "__main__":
     parser.add_argument('--algo_name', type=str, default=None)
     parser.add_argument('--confusion_matrix', type=bool, default=False)
     parser.add_argument('--test_robustness', type=bool, default=False)
-    parser.add_argument('--accuracy', type=bool, default=True)
+    parser.add_argument('--accuracy', type=bool, default=False)
     parser.add_argument('--tsne', type=bool, default=False)
     parser.add_argument('--flatness', type=bool, default=False)
     parser.add_argument('--tsneOut_dir', type=str, default="./domainbed/tsneOuts/DIT_deit_small_di_train")
     args = parser.parse_args()
+    heterogeneous_class=False
     if(args.pretrained==None):
         onlyfiles = [f for f in os.listdir(args.output_dir) if os.path.isfile(os.path.join(args.output_dir, f))]
         for f in onlyfiles:
@@ -194,77 +195,72 @@ if __name__ == "__main__":
     if args.dataset in vars(datasets):
         dataset = vars(datasets)[args.dataset](args.data_dir,
             args.test_envs, hparams)
+        misc.Class_names=dataset.Class_names
     else:
         raise NotImplementedError
 
 
     in_splits = []
-    in_split_eval=[]
     out_splits = []
     uda_splits = []
-    class_weights=[]
-    num_classes=dataset.num_classes
-
     
     for env_i, env in enumerate(dataset):
-        in_splits_sub=[]
-        out_splits_sub=[]
-        uda_sub_split=[]
-        in_split_eval_sub=[]
-        for clsnum in range(num_classes):
-            uda = []
+        uda = []
 
-            out, in_ = misc.split_dataset(env[clsnum],
-                int(len(env[clsnum])*args.holdout_fraction),
+        out, in_ = misc.split_dataset(env,
+            int(len(env)*args.holdout_fraction),
+            misc.seed_hash(args.trial_seed, env_i))
+
+        if env_i in args.test_envs:
+            uda, in_ = misc.split_dataset(in_,
+                int(len(in_)*args.uda_holdout_fraction),
                 misc.seed_hash(args.trial_seed, env_i))
-
-            if env_i in args.test_envs:
-                uda, in_ = misc.split_dataset(in_,
-                    int(len(in_)*args.uda_holdout_fraction),
-                    misc.seed_hash(args.trial_seed, env_i))
-
-            if hparams['class_balanced']:
-                in_weights = misc.make_weights_for_balanced_classes(in_)
-                out_weights = misc.make_weights_for_balanced_classes(out)
-                if uda is not None:
-                    uda_weights = misc.make_weights_for_balanced_classes(uda)
+        if(heterogeneous_class):
+     
+            Classes=[y for _,y in in_]
+            Classes=torch.tensor(Classes).to("cuda")
+            if (env_i in args.test_envs):
+                eval_weight_sp.append(out_weights_sp)
+                in_weights=torch.index_select(in_weights_sp, 0, Classes)
+                in_weights=in_weights/torch.sum(in_weights)
             else:
-                in_weights, out_weights, uda_weights = None, None, None
-            in_splits_sub.append((in_, in_weights))
-            in_split_eval_sub.append(in_)
-            out_splits_sub.append((out))
-            if len(uda):
-                uda_splits.append((uda, uda_weights))
-        in_splits.append(in_splits_sub)
-        out_splits.append(torch.utils.data.ConcatDataset(out_splits_sub))
-        in_split_eval.append(torch.utils.data.ConcatDataset(in_split_eval_sub))
+                eval_weight_sp.append(in_weights_sp)
+                in_weights=torch.index_select(in_weights_sp, 0, Classes)
+                in_weights=in_weights/torch.sum(in_weights)
+                
+            if (env_i in args.test_envs):
+                out_weights=torch.index_select(in_weights_sp, 0, Classes)
+                out_weights=out_weights/torch.sum(in_weights)
+            else:
+                out_weights=torch.index_select(in_weights_sp, 0, Classes)
+                out_weights=out_weights/torch.sum(in_weights)
 
-        # uda_splits.append(torch.utils.data.ConcatDataset(uda_sub_split))
-   
-    # print(len(in_splits[0]))
+            if uda is not None:
+                uda_weights = misc.make_weights_for_balanced_classes(uda)
+        elif hparams['class_balanced']:
+            in_weights = misc.make_weights_for_balanced_classes(in_)
+    
+            out_weights = misc.make_weights_for_balanced_classes(out)
+            if uda is not None:
+                uda_weights = misc.make_weights_for_balanced_classes(uda)
+        else:
+            in_weights, out_weights, uda_weights = None, None, None
+        in_splits.append((in_, in_weights))
+        out_splits.append((out, out_weights))
+        if len(uda):
+            uda_splits.append((uda, uda_weights))
+
     if args.task == "domain_adaptation" and len(uda_splits) == 0:
         raise ValueError("Not enough unlabeled samples for domain adaptation.")
 
-    # train_loaders =[[InfiniteDataLoader(
-    #     dataset=cls,
-    #     weights=cls_weights,
-    #     batch_size=hparams['batch_size'],
-    #     num_workers=dataset.N_WORKERS)
-    #     for (cls, cls_weights) in in_splits_env] for i, in_splits_env in enumerate(in_splits) if i not in args.test_envs ]
-
-    class_wise_batchSize=ceil(hparams['batch_size']/hparams['num_class_select']*1.0)
-    num_class_select=hparams['num_class_select']
-    in_splits=list(zip(*in_splits))
-    # print(in_splits[0])
-    # print(len(in_splits))
-
-    eval_loaders = [FastDataLoader(
+    train_loaders = [InfiniteDataLoader(
         dataset=env,
-        batch_size=64,
+        weights=env_weights,
+        batch_size=hparams['batch_size'],
         num_workers=dataset.N_WORKERS)
-        for env in ( in_split_eval+out_splits+uda_splits )]
+        for i, (env, env_weights) in enumerate(in_splits)
+        if i not in args.test_envs]
 
- 
     uda_loaders = [InfiniteDataLoader(
         dataset=env,
         weights=env_weights,
@@ -273,15 +269,19 @@ if __name__ == "__main__":
         for i, (env, env_weights) in enumerate(uda_splits)
         if i in args.test_envs]
 
-    
-    # eval_weights = [None for _, weights in (in_splits + out_splits + uda_splits)]
-    eval_weights = [None for _  in ( in_split_eval +out_splits+ uda_splits)]
+    eval_loaders = [FastDataLoader(
+        dataset=env,
+        batch_size=64,
+        num_workers=dataset.N_WORKERS)
+        for env, _ in (in_splits + out_splits + uda_splits)]
+    eval_weights = [weights for _, weights in (in_splits + out_splits + uda_splits)]
     eval_loader_names = ['env{}_in'.format(i)
-        for i in range(len(in_split_eval))]
+        for i in range(len(in_splits))]
     eval_loader_names += ['env{}_out'.format(i)
         for i in range(len(out_splits))]
     eval_loader_names += ['env{}_uda'.format(i)
         for i in range(len(uda_splits))]
+
 
     algorithm_class = algorithms.get_algorithm_class(args.algorithm)
     if args.algorithm=="Testing":
@@ -302,18 +302,48 @@ if __name__ == "__main__":
         algorithm.load_state_dict(algorithm_dict)
 
     algorithm.to(device)
-   
-    # train_minibatches_iterator = [zip(*trainLoad) for trainLoad in train_loaders]
+
+
+    train_minibatches_iterator = zip(*train_loaders)
     uda_minibatches_iterator = zip(*uda_loaders)
     checkpoint_vals = collections.defaultdict(lambda: [])
 
-    # steps_per_epoch = min([len(env)/hparams['batch_size'] for env,_ in in_splits])
+    steps_per_epoch = min([len(env)/hparams['batch_size'] for env,_ in in_splits])
 
-    
+    # n_steps = args.steps or dataset.N_STEPS
     # checkpoint_freq = args.checkpoint_freq or dataset.CHECKPOINT_FREQ
 
+    def save_checkpoint(filename):
+        if args.skip_model_save:
+            return
+        save_dict = {
+            "args": vars(args),
+            "model_input_shape": dataset.input_shape,
+            "model_num_classes": dataset.num_classes,
+            "model_num_domains": len(dataset) - len(args.test_envs),
+            "model_hparams": hparams,
+            "model_dict": algorithm.state_dict()
+        }
+        torch.save(save_dict, os.path.join(args.output_dir, filename))
 
-    ################################ Code required for ---- ################################
+    def save_checkpoint_best(filename,algo):
+        if args.skip_model_save:
+            return
+        save_dict = {
+            "args": vars(args),
+            "model_input_shape": dataset.input_shape,
+            "model_num_classes": dataset.num_classes,
+            "model_num_domains": len(dataset) - len(args.test_envs),
+            "model_hparams": hparams,
+            "model_dict": algo.state_dict()
+        }
+        torch.save(save_dict, os.path.join(args.output_dir, filename))
+
+    last_results_keys = None
+    start_time=time.time()
+    best_val_acc=0
+
+
         
     last_results_keys = None
     # for step in range(start_step, n_steps):
@@ -341,7 +371,7 @@ if __name__ == "__main__":
     evals = zip(eval_loader_names, eval_loaders, eval_weights)
     algo_name=args.algo_name
 
-    name_conv=algo_name+str(args.test_envs)+"_tr"+str(args.trial_seed)+"di token"
+    name_conv=algo_name+str(args.test_envs)+"_tr"+str(args.trial_seed)+"check"
     if(args.tsne):
         if(os.path.exists("tsne/TSVS/meta_"+name_conv+".tsv")):
             os.remove("tsne/TSVS/meta_"+name_conv+".tsv")
