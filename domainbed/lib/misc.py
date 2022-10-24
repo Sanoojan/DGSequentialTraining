@@ -12,10 +12,11 @@ from shutil import copyfile
 from collections import OrderedDict, defaultdict
 from numbers import Number
 import operator
-
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import tqdm
+import torch.nn.functional as F
 from collections import Counter
 
 Class_names=[]
@@ -268,8 +269,8 @@ def TsneFeatures(network, loader, weights, device, output_dir, env_name, algo_na
                 image_features = image_features / image_features.norm(dim=1, keepdim=True)
                 text_features = text_features / text_features.norm(dim=1, keepdim=True)
                 logit_scale = network.featurizer.logit_scale.exp()
-                angles = logit_scale * image_features @ text_features.t()
-                angles=angles/torch.sum(angles,dim=1,keepdim=True)
+                angles =image_features @ text_features.t()
+                # angles=angles/torch.sum(angles,dim=1,keepdim=True)
                 # print(angles)
                 Features.append(angles)
             else:
@@ -299,6 +300,261 @@ def TsneFeatures(network, loader, weights, device, output_dir, env_name, algo_na
     # print(len(Features))
     # print(Features[0].shape)
     return Features,labels
+
+def two_model_analysis(network,network_comp, loader, weights, device,noise_sd=0.5,addnoise=False,env_name="env0"):
+    correct = 0
+    total = 0
+    weights_offset = 0
+    pred_cls_all=[]
+    pred_comp_cls_all=[]
+    y_all=[]
+    all_x=[]
+    network.eval()
+    network_comp.eval()
+    with torch.no_grad():
+        for x, y in loader:
+            x = x.to(device)
+            y = y.to(device)
+            if(addnoise):
+                x=x + torch.randn_like(x, device='cuda') * noise_sd
+            p = network.predict(x)
+            p_comp=network_comp.predict(x)
+            pred_cls=torch.argmax(p, dim=1)
+            pred_comp_cls=torch.argmax(p_comp, dim=1)
+            pred_cls_all.append(pred_cls)
+            pred_comp_cls_all.append(pred_comp_cls)
+            y_all.append(y)
+            all_x.append(x)
+            if weights is None:
+                batch_weights = torch.ones(len(x))
+            else:
+                batch_weights = weights[weights_offset: weights_offset + len(x)]
+                weights_offset += len(x)
+            batch_weights = batch_weights.to(device)
+            # print(p.shape)
+            if len(p.shape)==1:
+                p = p.reshape(1,-1)
+            if p.size(1) == 1:
+
+                # if p.size(1) == 1:
+                correct += (p.gt(0).eq(y).float() * batch_weights.view(-1, 1)).sum().item()
+            else:
+                # print('p hai ye', p.size(1))
+                correct += (p.argmax(1).eq(y).float() * batch_weights).sum().item()
+            total += batch_weights.sum().item()
+    network.train()
+    print("predicted_cls")
+    pred_cls_all=torch.cat(pred_cls_all,dim=0).cpu().numpy()
+    pred_comp_cls_all=torch.cat(pred_comp_cls_all,dim=0).cpu().numpy()
+    y_all=torch.cat(y_all,dim=0).cpu().numpy()
+    all_x=torch.cat(all_x,dim=0)
+    correct_classes=[]
+    selected_images=[]
+    for i in range(pred_cls_all.size):
+        if(pred_cls_all[i]!=y_all[i] and pred_comp_cls_all[i]==y_all[i]):
+            correct_classes.append(pred_comp_cls_all[i])
+            torchvision.utils.save_image(all_x[i],'two_model_analysis_neg/test_env:'+env_name+'_cls:'+str(pred_comp_cls_all[i])+"_num_"+str(i)+'.png')
+        else:
+            correct_classes.append(-1)
+    pred_corr=np.array([pred_cls_all==y_all]).astype('int')
+    pred_comp_corr=np.array([pred_comp_cls_all==y_all]).astype('int')
+    
+    pred_only_correct=pred_corr-pred_comp_corr
+    pred_only_correct[pred_only_correct<0]=0
+    only_correct_in_algo=np.count_nonzero(pred_only_correct)
+    print(np.count_nonzero(pred_only_correct))
+    print(total)
+    print(Counter(correct_classes))
+    print("classes:",Counter(y_all))
+    
+    return only_correct_in_algo / total
+
+
+def loss_ret(network, loader, weights, device,noise_sd=0.5,addnoise=False):
+    correct = 0
+    total = 0
+    weights_offset = 0
+    total_loss=0
+    network.eval()
+    counter=0
+    try:
+        Transnetwork = network.featurizer
+    except:
+        Transnetwork = network.network
+    with torch.no_grad():
+        for x, y in loader:
+            counter+=1
+            x = x.to(device)
+            y = y.to(device)
+            # p,output_rb = network.network(x,flatness=True)
+            if(addnoise):
+                x=x + torch.randn_like(x, device='cuda') * noise_sd
+            # p = network.predict(x)
+            image_features = Transnetwork.encode_image(x) @ Transnetwork.visual.proj # vit
+            
+            text_features = network.text_features
+            image_features = image_features / image_features.norm(dim=1, keepdim=True)
+            text_features = text_features / text_features.norm(dim=1, keepdim=True)
+            logit_scale = network.featurizer.logit_scale.exp()
+      
+            logits_per_image = logit_scale * image_features @ text_features.t()
+            loss=F.cross_entropy(logits_per_image, y)
+            
+            # rb_loss = F.kl_div(
+            #     F.log_softmax(output_rb / 6.0, dim=1),
+            #     ## RB output cls token, original network output cls token
+            #     F.log_softmax(p / 6.0, dim=1),
+            #     reduction='sum',
+            #     log_target=True
+            # ) * (6.0 * 6.0) / output_rb.numel()
+
+            total_loss+=loss
+            # +0.5*rb_loss
+            if weights is None:
+                batch_weights = torch.ones(len(x))
+            else:
+                batch_weights = weights[weights_offset: weights_offset + len(x)]
+                weights_offset += len(x)
+            batch_weights = batch_weights.to(device)
+            # print(p.shape)
+            if len(p.shape)==1:
+                p = p.reshape(1,-1)
+            if p.size(1) == 1:
+
+                # if p.size(1) == 1:
+                correct += (p.gt(0).eq(y).float() * batch_weights.view(-1, 1)).sum().item()
+            else:
+                # print('p hai ye', p.size(1))
+                correct += (p.argmax(1).eq(y).float() * batch_weights).sum().item()
+            total += batch_weights.sum().item()
+    network.train()
+
+    return total_loss/(counter*1.0),correct / total
+
+def confusionMatrix(network, loader, weights, device, output_dir, env_name, algo_name,args,algorithm_class,dataset,hparams):
+    trials=3
+    
+    
+    if algo_name is None:
+        algo_name = type(network).__name__
+    conf_mat_all=[]
+    
+    for i in range(trials):
+        pretrained_path=args.pretrained
+        pretrained_path=pretrained_path[:-14]+str(i)+pretrained_path[-13:]
+        network = algorithm_class(dataset.input_shape, dataset.num_classes,
+            len(dataset) - len(args.test_envs), hparams,pretrained_path) #args.pretrained
+        network.to(device)
+        correct = 0
+        total = 0
+        weights_offset = 0
+        y_pred = []
+        y_true = []
+        
+        with torch.no_grad():
+            for x, y in loader:
+                x = x.to(device)
+                y = y.to(device)
+                p = network.predict(x)
+                pred = p.argmax(1)
+                y_true = y_true + y.to("cpu").numpy().tolist()
+                y_pred = y_pred + pred.to("cpu").numpy().tolist()
+                # print(y_true)
+                # print("hashf")
+                # print(y_pred)
+                if weights is None:
+                    batch_weights = torch.ones(len(x))
+                else:
+                    batch_weights = weights[weights_offset: weights_offset + len(x)]
+                    weights_offset += len(x)
+                batch_weights = batch_weights.to(device)
+                if p.size(1) == 1:
+                    # if p.size(1) == 1:
+                    correct += (p.gt(0).eq(y).float() * batch_weights.view(-1, 1)).sum().item()
+                else:
+                    # print('p hai ye', p.size(1))
+                    correct += (p.argmax(1).eq(y).float() * batch_weights).sum().item()
+                total += batch_weights.sum().item()
+        
+        conf_mat = confusion_matrix(y_true, y_pred)
+        # print(confusion_matrix(y_true, y_pred))
+        conf_mat_all.append(conf_mat)
+        print(conf_mat, 'cf_matrix')
+    conf_mat=(conf_mat_all[0]+conf_mat_all[1]+conf_mat_all[2])/(trials*1.0)
+    conf_mat=conf_mat.astype('int')
+    print(conf_mat, 'cf_matrix_average')
+    conf_mat=conf_mat/np.sum(conf_mat,axis=1,keepdims=True) #percentage calculator
+
+    sn.set(font_scale=20)  # for label size
+    plt.figure(figsize=(150, 150))
+    # sn.heatmap(conf_mat, cbar=False,square=True, annot=True,annot_kws={"size": 90},fmt='d',xticklabels=['DG','EP','GF','GT','HR','HS','PR'],yticklabels=['DG','EP','GF','GT','HR','HS','PR'])  # font size
+    ax=sn.heatmap(conf_mat, cmap="Greens", cbar=True,linewidths=4, square=True, annot=True,fmt='.1%',annot_kws={"size": 155},xticklabels=['0','1','2','3','4','5','6','7','8','9'],yticklabels=['0','1','2','3','4','5','6','7','8','9'])  # font size
+    # ax=sn.heatmap(conf_mat, cbar=True, cmap="Blues",annot=True,fmt='.1%',annot_kws={"size": 90},linewidths=4, square = True, xticklabels=['0','1','2','3','4','5','6'],yticklabels=['0','1','2','3','4','5','6'])  # font size
+    # ax=sn.heatmap(conf_mat, cbar=True, cmap="Blues",annot=True,fmt='.1%',annot_kws={"size": 90},linewidths=4, square = True, xticklabels=['0','1','2','3','4','5','6'],yticklabels=['0','1','2','3','4','5','6'])  # font size
+    plt.yticks(rotation=0)
+    ax.xaxis.tick_top() # x axis on top
+    ax.xaxis.set_label_position('top')
+    ax.axhline(y=0, color='k',linewidth=10)
+    ax.axhline(y=conf_mat.shape[1], color='k',linewidth=10)
+
+    ax.axvline(x=0, color='k',linewidth=10)
+    ax.axvline(x=conf_mat.shape[1], color='k',linewidth=10)
+    # plt.show()
+    plt.savefig('Confusion_matrices/'+algo_name+env_name+'.png',bbox_inches='tight')
+
+
+    
+
+    return correct / total
+
+# cmap='summer'
+
+
+
+def plot_block_accuracy2(network, loader, weights, device, output_dir, env_name, algo_name):
+    # print(network)
+
+    if algo_name is None:
+        algo_name = type(network).__name__
+    try:
+        network = network.network
+    except:
+        network = network.network_original
+    correct = [0] * len(network.blocks)
+    total = [0] * len(network.blocks)
+    weights_offset = [0] * len(network.blocks)
+
+    network.eval()
+    with torch.no_grad():
+        for x, y in loader:
+            x = x.to(device)
+            y = y.to(device)
+            p1 = network.acc_for_blocks(x)
+            for count, p in enumerate(p1):
+                if weights is None:
+                    batch_weights = torch.ones(len(x))
+                else:
+                    batch_weights = weights[weights_offset[count]: weights_offset[count] + len(x)]
+                    weights_offset[count] += len(x)
+                batch_weights = batch_weights.to(device)
+                # print(p.size, 'p size')
+                # if p.size(1) == 1:
+                if p.size(1) == 1:
+                    correct[count] += (p.gt(0).eq(y).float() * batch_weights.view(-1, 1)).sum().item()
+                else:
+                    # print('p hai ye', p.size(1))
+                    correct[count] += (p.argmax(1).eq(y).float() * batch_weights).sum().item()
+                total[count] += batch_weights.sum().item()
+
+    res = [i / j for i, j in zip(correct, total)]
+    print(algo_name, ":", env_name, ":blockwise accuracies:", res)
+    plt.plot(res)
+    plt.title(algo_name)
+    plt.xlabel('Block#')
+    plt.ylabel('Acc')
+    plt.ylim(0.0,1.0)
+    plt.savefig(output_dir + "/" + algo_name + "_" + env_name + "_" + 'acc.png')
+    return res
 
 class ParamDict(OrderedDict):
     """Code adapted from https://github.com/Alok/rl_implementations/tree/master/reptile.

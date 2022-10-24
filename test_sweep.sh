@@ -5,17 +5,26 @@
 
 python -m domainbed.scripts.test_sweep launch\
     --data_dir=/share/data/drive_2/DG/data \
-    --output_dir=./domainbed/outputs_clip/Clip_train_text_freeze/PACS/lr-0.000005 \
-    --command_launcher gpu_4\
-    --algorithms Clip_train_text_freeze\
+    --output_dir=./domainbed/outputs_clip/Clip_train_mixup_with_text_ft_uniform/TerraIncognita/lr-0.000005 \
+    --command_launcher gpu_5\
+    --algorithms Clip_train_mixup_with_text\
     --single_test_envs \
-    --test_robustness 0\
-    --accuracy 0\
-    --tsne 1\
-    --tsneOut_dir=./domainbed/tsneOuts/PACS-Clip_train_text_freeze \
-    --datasets PACS \
+    --datasets TerraIncognita \
     --n_hparams 1  \
     --n_trials 3 \
+    --skip_confirmation \
+    --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
+
+python -m domainbed.scripts.test_sweep launch\
+    --data_dir=/share/data/drive_2/DG/data \
+    --output_dir=./domainbed/outputs_clip/Clip_train_text_freeze/TerraIncognita/lr-0.000005 \
+    --command_launcher gpu_5\
+    --algorithms Clip_train_text_freeze\
+    --single_test_envs \
+    --datasets TerraIncognita \
+    --n_hparams 1  \
+    --n_trials 3 \
+    --skip_confirmation \
     --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005}"""\
 
 
