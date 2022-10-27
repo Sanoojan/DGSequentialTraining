@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models
-
+from gradinit import GradInitWrapper
 from domainbed.lib import wide_resnet
 import copy
 from domainbed.lib.visiontransformer import *
@@ -96,6 +96,7 @@ class ResNet(torch.nn.Module):
                 self.network = torchvision.models.resnet50()
                 self.n_outputs = 2048
             self.apply(self._init_weights_xavier_uniform)
+
         elif hparams['weight_init']=="trunc_normal":
             if hparams['backbone']=="Resnet18":
                 self.network = torchvision.models.resnet18()
@@ -104,8 +105,24 @@ class ResNet(torch.nn.Module):
                 self.network = torchvision.models.resnet50()
                 self.n_outputs = 2048
             self.apply(self._init_weights_trunc_normal)
+        elif hparams['weight_init']=="gradinit":
+            if hparams['backbone']=="Resnet18":
+                self.network = torchvision.models.resnet18()
+                self.n_outputs = 512
+            else:
+                self.network = torchvision.models.resnet50()
+                self.n_outputs = 2048
         
-            
+            ginit = GradInitWrapper(self.network)
+            ginit.detach() 
+        elif hparams['weight_init']=="uniform":
+            if hparams['backbone']=="Resnet18":
+                self.network = torchvision.models.resnet18()
+                self.n_outputs = 512
+            else:
+                self.network = torchvision.models.resnet50()
+                self.n_outputs = 2048
+            self.apply(self._init_weights_uniform)
         # self.network = remove_batch_norm_from_resnet(self.network)
             
         # adapt number of channels
@@ -134,6 +151,11 @@ class ResNet(torch.nn.Module):
             torch.nn.init.xavier_uniform_(module.weight)
             if module.bias is not None:
                 torch.nn.init.xavier_uniform_(module.bias)
+    def _init_weights_uniform(self, module):
+        if isinstance(module, nn.Conv2d):
+            torch.nn.init.uniform_(module.weight)
+            if module.bias is not None:
+                torch.nn.init.uniform_(module.bias)
 
     def _init_weights_trunc_normal(self, module):
         if isinstance(module, nn.Conv2d):
@@ -181,6 +203,7 @@ class ViT(torch.nn.Module):
             elif hparams['backbone']=="DeitBase":
                 self.network = deit_base_patch16_224(pretrained=True)
                 self.network.head = nn.Linear(768, num_classes)
+                self.n_outputs = 768
             else:
                 raise NotImplementedError
         elif hparams['weight_init']=="ImageNet21k":
@@ -192,9 +215,11 @@ class ViT(torch.nn.Module):
         elif hparams['weight_init']=="Dino":
             if hparams['backbone']=="DeitSmall":
                 self.network = load_dino("DinoSmall",num_classes=num_classes)
+                self.n_outputs = 384
                 # self.network.head = nn.Linear(384, num_classes)
             elif hparams['backbone']=="DeitBase":
                 self.network = load_dino("DinoBase",num_classes=num_classes)
+                self.n_outputs = 768
                 # self.network.head = nn.Linear(768, num_classes)
             else:
                 raise NotImplementedError
@@ -372,6 +397,15 @@ def Classifier(in_features, out_features, is_nonlinear=False,init=None):
         lin= torch.nn.Linear(in_features, out_features)
         if init=="xavier_uniform":
             torch.nn.init.xavier_uniform_(lin.weight)
+            lin.bias.data.fill_(0.01)
+        elif init=="trunc_normal":
+            torch.nn.init.trunc_normal_(lin.weight,std=.02)
+            lin.bias.data.fill_(0.01)
+        elif init=="gradinit":
+            ginit = GradInitWrapper(lin)
+            ginit.detach() 
+        elif init=="uniform":
+            torch.nn.init.uniform_(lin.weight)
             lin.bias.data.fill_(0.01)
         return lin
 

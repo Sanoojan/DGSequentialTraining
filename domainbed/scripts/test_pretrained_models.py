@@ -30,6 +30,7 @@ from domainbed.lib import misc
 from domainbed.lib.fast_data_loader import InfiniteDataLoader, FastDataLoader
 
 
+
 def load_model(fname):
     
     dump = torch.load(fname)
@@ -153,6 +154,7 @@ def plot_features(features, labels, num_classes,filename):
         features: (num_instances, num_features).
         labels: (num_instances).
     """
+
     colors = ['C0', 'C1', 'C2', 'C3', 'C8', 'C5', 'C6','C7','C9','C4']
     class_names=misc.Class_names
     if num_classes<=4:
@@ -163,16 +165,26 @@ def plot_features(features, labels, num_classes,filename):
     # class_names=[name for class in class_names[]]
     class_names_sel=[]
     for label_idx in unique_classes:
-        class_names_sel.append(class_names[label_idx])
-        plt.scatter(
-            features[labels==label_idx, 0],
-            features[labels==label_idx, 1],
-            c=colors[label_idx],
-            s=10,
-        )
-        plt.xticks([])
-        plt.yticks([])
+        if(label_idx==num_classes):
 
+            plt.scatter(
+                features[labels==label_idx, 0],
+                features[labels==label_idx, 1],
+                c='C3',
+                s=50,
+            )
+            plt.xticks([])
+            plt.yticks([])
+        else:
+            class_names_sel.append(class_names[label_idx])
+            plt.scatter(
+                features[labels==label_idx, 0],
+                features[labels==label_idx, 1],
+                c=colors[label_idx],
+                s=10,
+            )
+            plt.xticks([])
+            plt.yticks([])
     plt.legend(class_names_sel, loc='upper right', bbox_to_anchor=(1.2,1), labelspacing=1.2)
     #dirname = osp.join(args.save_dir, prefix)
     # if not osp.exists(dirname):
@@ -183,13 +195,13 @@ def plot_features(features, labels, num_classes,filename):
     plt.close()
 
 def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
-              filename: str,tsneOut_dir:str,domain_labels=['Art','Cartoon','Photo','Sketch']):
+              filename: str,tsneOut_dir:str,domain_labels=['location_38','location_43','location_46','location_100']):
     
 
     labels=np.array(labels)
     features=np.array(features)
     X_tsne = TSNE(n_components=2, random_state=33,init='pca').fit_transform(features)
-    X_PCA=PCA(n_components=2).fit_transform(features)
+    # X_PCA=PCA(n_components=2).fit_transform(features)
     # domain labels, 1 represents source while 0 represents target
     
 
@@ -201,6 +213,7 @@ def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
     ax.spines['left'].set_visible(False)
  
     labelscls=labels%10
+    labelscls[-len(misc.Class_names):]=len(misc.Class_names) #just class_id as last
     plot_features(X_tsne, labelscls, len(misc.Class_names),os.path.join(tsneOut_dir,"01clswise"+filename))
 
     fig, ax = plt.subplots(figsize=(10, 10))
@@ -211,11 +224,11 @@ def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
     labelsd=labels//10
     labelsdom=labels*0
     labelsdom[labelsd==int(args.test_envs[0])]=1
-    named_labels=[]
-    for lab in (labelsd):
-        named_labels.append(domain_labels[int(lab)])
+    # named_labels=[]
+    # for lab in (labelsd):
+    #     named_labels.append(domain_labels[int(lab)])
 
-    plot_features(X_tsne, labelsd, 3,os.path.join(tsneOut_dir,"01domwise"+filename))
+    plot_features(X_tsne[:-len(misc.Class_names)], labelsd[:-len(misc.Class_names)], 3,os.path.join(tsneOut_dir,"01domwise"+filename))
 
 
 
@@ -246,12 +259,13 @@ if __name__ == "__main__":
     parser.add_argument('--confusion_matrix', type=bool, default=False)
     parser.add_argument('--test_robustness', type=bool, default=False)
     parser.add_argument('--accuracy', type=bool, default=False)
-    parser.add_argument('--tsne', type=bool, default=False)
-    parser.add_argument('--flatness', type=bool, default=True)
+    parser.add_argument('--tsne', type=bool, default=True)
+    parser.add_argument('--flatness', type=bool, default=False)
     parser.add_argument('--polar', type=bool, default=False)
+    parser.add_argument('--segmentation', type=bool, default=False)
     parser.add_argument('--tsneOut_dir', type=str, default="./domainbed/tsneOuts/clip_train")
     args = parser.parse_args()
-    args.tsneOut_dir="./domainbed/tsneOuts/"+args.dataset+"/"+args.algorithm
+    args.tsneOut_dir="./domainbed/tsneOuts/feat2/"+args.dataset+"/"+args.algorithm
     heterogeneous_class=False
     if(args.pretrained==None):
         onlyfiles = [f for f in os.listdir(args.output_dir) if os.path.isfile(os.path.join(args.output_dir, f))]
@@ -359,13 +373,13 @@ if __name__ == "__main__":
     if args.task == "domain_adaptation" and len(uda_splits) == 0:
         raise ValueError("Not enough unlabeled samples for domain adaptation.")
 
-    train_loaders = [InfiniteDataLoader(
-        dataset=env,
-        weights=env_weights,
-        batch_size=hparams['batch_size'],
-        num_workers=dataset.N_WORKERS)
-        for i, (env, env_weights) in enumerate(in_splits)
-        if i not in args.test_envs]
+    # train_loaders = [InfiniteDataLoader(
+    #     dataset=env,
+    #     weights=env_weights,
+    #     batch_size=hparams['batch_size'],
+    #     num_workers=dataset.N_WORKERS)
+    #     for i, (env, env_weights) in enumerate(in_splits)
+    #     if i not in args.test_envs]
 
     uda_loaders = [InfiniteDataLoader(
         dataset=env,
@@ -410,7 +424,7 @@ if __name__ == "__main__":
     algorithm.to(device)
 
 
-    train_minibatches_iterator = zip(*train_loaders)
+    # train_minibatches_iterator = zip(*train_loaders)
     uda_minibatches_iterator = zip(*uda_loaders)
     checkpoint_vals = collections.defaultdict(lambda: [])
 
@@ -497,8 +511,8 @@ if __name__ == "__main__":
             #     continue
             # if(int(name[3]) in args.test_envs ):
             #     continue
-            if(int(name[3]) not in args.test_envs ):
-                continue
+            # if(int(name[3]) not in args.test_envs ):
+            #     continue
             print(name)
             Features,labels=misc.TsneFeatures(algorithm, loader, weights, device,args.output_dir,env_name,algo_name,polar=True)
             
@@ -526,8 +540,8 @@ if __name__ == "__main__":
             #     continue
             # if(int(name[3]) in args.test_envs ):
             #     continue
-            if(int(name[3]) not in args.test_envs ):
-                continue
+            # if(int(name[3]) not in args.test_envs ):
+            #     continue
             print(name)
             Features,labels=misc.TsneFeatures(algorithm, loader, weights, device,args.output_dir,env_name,algo_name)
             
@@ -552,8 +566,9 @@ if __name__ == "__main__":
             # Computing Flatness (comment gaussian noise with std for random normal scaling)
             
             loss_degr=[]
-            # x=list(np.arange(0.0,0.055,0.005))
-            x=[0,10,20,30,40,50,60]
+            # x=list(np.arange(0.0,35.0,5.0))
+            x=list(np.arange(0.0,0.0055,0.0005))
+            # x=[0,10,20,30,40,50,60]
             loss,acc=misc.loss_ret(algorithm, loader, weights, device)
             loss_degr.append(loss.item())
             accuracies=[]
@@ -563,18 +578,19 @@ if __name__ == "__main__":
                     continue
                 total_loss=0
                 tot_accuracy=0
-                for j in range(50):
+                for j in range(5):
 
                     algo_cpy=copy.deepcopy(algorithm)
-                    net=algo_cpy.network
+                    net=algo_cpy.featurizer.visual
                     Ws=copy.deepcopy(net.state_dict())
                     num_trainable_params = sum(p.numel() for p in net.parameters() if p.requires_grad)
                     # print(num_trainable_params)
-                    direction_vector = torch.randn(num_trainable_params)
-                    unit_direction_vector = direction_vector / torch.norm(direction_vector)
-                    unit_direction_vector*=rad
 
-                    # unit_direction_vector=torch.normal(0.0, float(rad), size=(sum(p.numel() for p in net.parameters() if p.requires_grad),))  #gaussian noise with std
+                    # direction_vector = torch.randn(num_trainable_params)
+                    # unit_direction_vector = direction_vector / torch.norm(direction_vector)
+                    # unit_direction_vector*=rad
+
+                    unit_direction_vector=torch.normal(0.0, float(rad), size=(sum(p.numel() for p in net.parameters() if p.requires_grad),))  #gaussian noise with std
                     i=0
                     for k,w in Ws.items():
 
@@ -589,8 +605,8 @@ if __name__ == "__main__":
                     loss_diff=loss_ch-loss
                     total_loss+=loss_ch
                     tot_accuracy+=acc
-                total_loss/=50.0
-                tot_accuracy/=50.0
+                total_loss/=5.0
+                tot_accuracy/=5.0
                 # print(rad)
                 # print(total_loss)
                 # print(tot_accuracy)
@@ -660,6 +676,25 @@ if __name__ == "__main__":
 
     checkpoint_vals = collections.defaultdict(lambda: [])
     if(args.tsne or args.polar):
+        if args.polar:
+            text_features = algorithm.text_features
+            text_features = text_features / text_features.norm(dim=1, keepdim=True)
+            logit_scale = algorithm.featurizer.logit_scale.exp()
+            angles =(text_features @ text_features.t()).cpu().detach().numpy()
+            print(angles)
+            for i in range(dataset.num_classes):
+                Features_all.append(angles[i])
+                labels_all.append(100)
+        else:
+            text_features = algorithm.text_features
+            text_features = (text_features / text_features.norm(dim=1, keepdim=True)).cpu().detach().numpy()
+            for i in range(dataset.num_classes):
+                Features_all.append(text_features[i])
+                labels_all.append(100)
+        # print(labels_all) 
+        # print(Features_all)
+            
+             
         visualizeEd(Features_all, labels_all,tokenlabels,name_conv+".jpg",args.tsneOut_dir)
       
 

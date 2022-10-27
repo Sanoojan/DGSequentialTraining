@@ -182,12 +182,22 @@ class ResidualAttentionBlock(nn.Module):
         self.ln_2 = LayerNorm(d_model)
         self.attn_mask = attn_mask
 
-    def attention(self, x: torch.Tensor):
+    def attention(self, x: torch.Tensor,return_attention=False):
         self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
+        # print(self.attn_mask)
+        if(return_attention):
+            return self.attn(x, x, x, need_weights=True, attn_mask=self.attn_mask)
         return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
 
-    def forward(self, x: torch.Tensor):
-        x = x + self.attention(self.ln_1(x))
+    def forward(self, x: torch.Tensor,return_attention=False,attentions=[]):
+        if(return_attention):
+            out,attn=self.attention(self.ln_1(x),return_attention=return_attention)
+            attentions.append(attn)
+        else:
+            out=self.attention(self.ln_1(x))
+       
+        x = x + out
+        
         x = x + self.mlp(self.ln_2(x))
         return x
 
@@ -199,8 +209,13 @@ class Transformer(nn.Module):
         self.layers = layers
         self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask) for _ in range(layers)])
 
-    def forward(self, x: torch.Tensor):
-        return self.resblocks(x)
+    def forward(self, x: torch.Tensor,return_attention=False,attentions=[]):
+        if(return_attention):
+            for blk in self.resblocks:
+                x=blk(x,return_attention=return_attention,attentions=attentions)
+            return x
+        else:
+            return self.resblocks(x)
 
 
 class VisionTransformer(nn.Module):
@@ -220,9 +235,10 @@ class VisionTransformer(nn.Module):
 
         self.ln_post = LayerNorm(width)
         self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
-       
+        self.attentions=[]
 
-    def forward(self, x: torch.Tensor,return_all_token=False):
+    def forward(self, x: torch.Tensor,return_all_token=False,return_attention=False):
+        self.attentions=[]
         x = self.conv1(x)  # shape = [*, width, grid, grid]
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
         x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
@@ -231,7 +247,10 @@ class VisionTransformer(nn.Module):
         x = self.ln_pre(x)
 
         x = x.permute(1, 0, 2)  # NLD -> LND
-        x = self.transformer(x)
+        if(return_attention):
+            x = self.transformer(x,return_attention=return_attention,attentions=self.attentions)
+        else:
+            x = self.transformer(x,return_attention=return_attention)
         x = x.permute(1, 0, 2)  # LND -> NLD
         if(return_all_token):
             x = self.ln_post(x)
@@ -239,7 +258,8 @@ class VisionTransformer(nn.Module):
             x = self.ln_post(x[:, 0, :])
         # if self.proj is not None:
         #     x = x @ self.proj
-
+        if(return_attention):
+            return x,self.attentions
         return x
 
 

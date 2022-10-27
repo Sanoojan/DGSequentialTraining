@@ -274,6 +274,7 @@ def TsneFeatures(network, loader, weights, device, output_dir, env_name, algo_na
                 # print(angles)
                 Features.append(angles)
             else:
+                image_features = image_features / image_features.norm(dim=1, keepdim=True)
                 Features.append(image_features)
             # Features.append(di_feat)
             # Features2.append(DI)
@@ -397,8 +398,8 @@ def loss_ret(network, loader, weights, device,noise_sd=0.5,addnoise=False):
             text_features = text_features / text_features.norm(dim=1, keepdim=True)
             logit_scale = network.featurizer.logit_scale.exp()
       
-            logits_per_image = logit_scale * image_features @ text_features.t()
-            loss=F.cross_entropy(logits_per_image, y)
+            p = logit_scale * image_features @ text_features.t()
+            loss=F.cross_entropy(p, y)
             
             # rb_loss = F.kl_div(
             #     F.log_softmax(output_rb / 6.0, dim=1),

@@ -6,7 +6,7 @@
 python -m domainbed.scripts.test_sweep launch\
     --data_dir=/share/data/drive_2/DG/data \
     --output_dir=./domainbed/outputs_clip/Clip_train_mixup_with_text_ft_uniform/TerraIncognita/lr-0.000005 \
-    --command_launcher gpu_5\
+    --command_launcher gpu_1\
     --algorithms Clip_train_mixup_with_text\
     --single_test_envs \
     --datasets TerraIncognita \
@@ -18,7 +18,7 @@ python -m domainbed.scripts.test_sweep launch\
 python -m domainbed.scripts.test_sweep launch\
     --data_dir=/share/data/drive_2/DG/data \
     --output_dir=./domainbed/outputs_clip/Clip_train_text_freeze/TerraIncognita/lr-0.000005 \
-    --command_launcher gpu_5\
+    --command_launcher gpu_0\
     --algorithms Clip_train_text_freeze\
     --single_test_envs \
     --datasets TerraIncognita \

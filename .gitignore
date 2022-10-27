@@ -31,3 +31,4 @@ SweepDGX.sh
 output.*.txt
 TSNE/
 tsne/
+AttentionVis/

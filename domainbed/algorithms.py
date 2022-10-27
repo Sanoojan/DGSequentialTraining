@@ -54,6 +54,7 @@ ALGORITHMS = [
     'TRM',
     'IB_ERM',
     'IB_IRM',
+    'Clip_train_mixup_with_text'
 ]
 
 def get_algorithm_class(algorithm_name):
@@ -802,83 +803,16 @@ class ERM_ViT_LPFT(Algorithm):
         return self.network(x)
 
 
+
+
 class Clip_train(Algorithm):
     """
     Empirical Risk Minimization (ERM)
     """
-    
+
 
     def __init__(self, input_shape, num_classes, num_domains, hparams):
         super(Clip_train, self).__init__(input_shape, num_classes, num_domains,
-                                  hparams)
-
-        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
-        if(self.hparams['weight_init']=="clip_full"):
-            print("clip_full")
-            # self.featurizer.network.proj=None
-        # else:
-
-        #     self.featurizer.network.head=nn.Identity()
-
-        # self.network = nn.Sequential(self.featurizer, self.classifier)
-        printNetworkParams(self.featurizer)
-        self.optimizer = torch.optim.AdamW(
-            list(self.featurizer.parameters()),
-            lr=self.hparams["lr"],
-            weight_decay=self.hparams['weight_decay']
-        )
-        self.Class_names=misc.Class_names
-        # print(self.Class_names)
-        self.cnt=0
-
-    def update(self, minibatches, unlabeled=None):
-        all_x = torch.cat([x for x,y in minibatches])
-        all_y = torch.cat([y for x,y in minibatches])
-        # with torch.no_grad():
-        text_inputs  = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
-        image_features = self.featurizer.encode_image(all_x)
-        text_features = self.featurizer.encode_text(text_inputs)
-        image_features = image_features @ self.featurizer.visual.proj
-        image_features = image_features / image_features.norm(dim=1, keepdim=True)
-        text_features = text_features / text_features.norm(dim=1, keepdim=True)
-        logit_scale = self.featurizer.logit_scale.exp()
-
-        logits_per_image = logit_scale * image_features @ text_features.t()
-        loss=F.cross_entropy(logits_per_image, all_y)
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-        self.cnt+=1
-        return {'loss': loss.item()}
-
-    def predict(self, x):
-        text_inputs = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
-        
-        image_features = self.featurizer.encode_image(x)
-        text_features = self.featurizer.encode_text(text_inputs)
-        # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
-        image_features = image_features @ self.featurizer.visual.proj
-
-        image_features = image_features / image_features.norm(dim=1, keepdim=True)
-        text_features = text_features / text_features.norm(dim=1, keepdim=True)
-    
-
-        # cosine similarity as logits
-        logit_scale = self.featurizer.logit_scale.exp()
-
-        logits_per_image = logit_scale * image_features @ text_features.t()
-        
-        return logits_per_image
-
-class Clip_train_text_freeze(Algorithm):
-    """
-    Empirical Risk Minimization (ERM)
-    """
-
-    
-
-    def __init__(self, input_shape, num_classes, num_domains, hparams):
-        super(Clip_train_text_freeze, self).__init__(input_shape, num_classes, num_domains,
                                   hparams)
 
         self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
@@ -968,7 +902,7 @@ class Clip_train_mixup(Algorithm):
         # print(self.Class_names)
         self.cnt=0
         self.num_domains=num_domains
-        self.mixup_weight=0.6
+        self.mixup_weight=0.5
 
     def update(self, minibatches, unlabeled=None):
         all_x = torch.cat([x for x,y in minibatches])
@@ -1093,8 +1027,9 @@ class Clip_train_mixup_with_text(Algorithm):
         mixup_features=torch.unsqueeze(a[:,0],dim=1).expand(-1,768)*mixup_features
         mixup_text_feature=torch.unsqueeze(a[:,0],dim=1).expand(-1,512)*mixup_text_feature
         for d in range(1,self.num_domains):
-            mixup_features+=torch.unsqueeze(a[:,d],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[(dom+d)%self.num_domains] for dom in range(self.num_domains)]),dim=0)
-            mixup_text_feature+=torch.unsqueeze(a[:,d],dim=1).expand(-1,512)*torch.cat(([mixup_text_chunk[(dom+d)%self.num_domains] for dom in range(self.num_domains)]),dim=0)
+            rand_perm=torch.randperm(bs)
+            mixup_features+=torch.unsqueeze(a[:,d],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[(dom+d)%self.num_domains][rand_perm] for dom in range(self.num_domains)]),dim=0)
+            mixup_text_feature+=torch.unsqueeze(a[:,d],dim=1).expand(-1,512)*torch.cat(([mixup_text_chunk[(dom+d)%self.num_domains][rand_perm] for dom in range(self.num_domains)]),dim=0)
   
         
         text_features = self.text_features
@@ -1144,6 +1079,7 @@ class Clip_train_mixup_with_text(Algorithm):
         logits_per_image = logit_scale * image_features @ text_features.t()
         
         return logits_per_image
+
 
 class Clip_train_mixup_with_text_hetro(Algorithm):
     """
@@ -2237,6 +2173,7 @@ class Mixup(Algorithm):
                                   hparams)
         # self.featurizer = networks.Featurizer(input_shape, self.hparams)
         self.featurizer = networks.ViT(input_shape, self.hparams,num_classes)
+        self.featurizer.network.head=nn.Identity()
         self.classifier = networks.Classifier(
             self.featurizer.n_outputs,
             num_classes,
