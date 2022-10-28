@@ -81,7 +81,7 @@ class ResNet(torch.nn.Module):
             else:
                 self.network = torchvision.models.resnet50(pretrained=True)
                 self.n_outputs = 2048
-        elif hparams['weight_init']=="Random":
+        elif hparams['weight_init']=="kaiming_normal":
             if hparams['backbone']=="Resnet18":
                 self.network = torchvision.models.resnet18()
                 self.n_outputs = 512
@@ -406,6 +406,9 @@ def Classifier(in_features, out_features, is_nonlinear=False,init=None):
             ginit.detach() 
         elif init=="uniform":
             torch.nn.init.uniform_(lin.weight)
+            lin.bias.data.fill_(0.01)
+        elif init=="kaiming_normal":
+            torch.nn.init.kaiming_normal_(lin.weight)
             lin.bias.data.fill_(0.01)
         return lin
 

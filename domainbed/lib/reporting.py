@@ -22,7 +22,8 @@ def load_records(path,test_post_results=False,get_recursively=False):
                 #append the file name to the list
                 filelist.append(os.path.join(root,file))
         if (test_post_results):
-            results_ext = "results_test.jsonl"
+            results_ext = "results_T3A.jsonl"
+            print("d")
         else:
             results_ext = "results.jsonl"
         for name in filelist:
@@ -33,6 +34,7 @@ def load_records(path,test_post_results=False,get_recursively=False):
             try:
                 with open(results_path, "r") as f:
                     for line in f:
+                        
                         records.append(json.loads(line[:-1]))
             except IOError:
                 pass
@@ -45,7 +47,7 @@ def load_records(path,test_post_results=False,get_recursively=False):
             
             
             if (test_post_results):
-                results_path = os.path.join(path, subdir, "results_test.jsonl")
+                results_path = os.path.join(path, subdir, "results_T3A.jsonl")
             else:
                 results_path = os.path.join(path, subdir, "results.jsonl")
             try:

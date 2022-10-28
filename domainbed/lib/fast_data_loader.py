@@ -71,3 +71,10 @@ class FastDataLoader:
 
     def __len__(self):
         return self._length
+
+class DataParallelPassthrough(torch.nn.DataParallel):
+    def __getattr__(self, name):
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            return getattr(self.module, name)

@@ -11,6 +11,7 @@ import torchvision
 import copy
 import numpy as np
 import einops
+import os
 import itertools
 import domainbed.lib.clip.clip as clip
 from collections import defaultdict, OrderedDict
@@ -3394,6 +3395,63 @@ def printNetworkParams(net):
     print("pytorch_total_trainable_params:",pytorch_total_trainable_params)
 
 
+
+
+class Testing(Algorithm): 
+
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams, input_dir=None):
+        super(Testing, self).__init__(input_shape, num_classes, num_domains,
+                                           hparams)
+
+        lists=os.listdir(input_dir)
+        model_name='IID_best.pkl'
+        for mod_name in lists:
+            if "best" in mod_name:
+                model_name=mod_name
+                break
+
+        
+
+        algo=load_model(input_dir+model_name)
+        self.network=algo.featurizer
+ 
+        self.featurizer=copy.deepcopy(self.network)
+        # self.featurizer.head=Identity()
+        self.text_features=algo.text_features
+
+        self.classifier=torch.nn.Linear(768,512)
+        self.classifier.weight = self.network.visual.proj
+        
+        # self.network.head = nn.Linear(384, num_classes)
+        # self.network.head_dist = nn.Linear(384, num_classes)  # reinitialize the last layer
+
+        self.optimizer = torch.optim.AdamW(self.network.parameters(),
+                                           lr=self.hparams["lr"],
+                                           weight_decay=self.hparams['weight_decay']
+                                           )
+
+    def update(self, minibatches, unlabeled=None):
+        return None
+
+    def predict(self, x):
+
+        image_features = self.featurizer.encode_image(x)
+        text_features = self.text_features
+        # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
+        image_features = image_features @ self.featurizer.visual.proj
+
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+    
+
+        # cosine similarity as logits
+        logit_scale = self.featurizer.logit_scale.exp()
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        
+        return logits_per_image
+
 def load_model(fname):
     dump = torch.load(fname)
     algorithm_class = get_algorithm_class(dump["args"]["algorithm"])
@@ -3402,5 +3460,13 @@ def load_model(fname):
         dump["model_num_classes"],
         dump["model_num_domains"],
         dump["model_hparams"])
-    algorithm.load_state_dict(dump["model_dict"],strict=False)
+    algorithm.load_state_dict(dump["model_dict"],strict=True)
     return algorithm
+
+class Identity(torch.nn.Module):
+    """An identity layer"""
+    def __init__(self):
+        super(Identity, self).__init__()
+
+    def forward(self, x):
+        return x
