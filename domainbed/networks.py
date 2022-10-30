@@ -273,18 +273,76 @@ class ViT(torch.nn.Module):
         elif hparams['weight_init']=="xavier_uniform":
             if hparams['backbone']=="DeitSmall":
                 self.network = deit_small_patch16_224(pretrained=False,weight_init='xavier')
-                self.network.head = nn.Linear(384, num_classes)
+                self.n_outputs = 384
+                self.network.head = Classifier(self.n_outputs, num_classes,init=hparams['weight_init'])
+                
             elif hparams['backbone']=="CVTSmall":
                 self.network = small_cvt(pretrained=False,init="xavier")
                 self.network.head = nn.Linear(384, num_classes)
             else:
                 raise NotImplementedError
+            self.apply(self._init_weights_xavier_uniform)
+        elif hparams['weight_init']=="gradinit":
+            if hparams['backbone']=="DeitSmall":
+                self.network = deit_small_patch16_224(pretrained=False)
+                self.n_outputs = 384
+                self.network.head = Classifier(self.n_outputs, num_classes,init=hparams['weight_init'])
+            elif hparams['backbone']=="CVTSmall":
+                self.network = small_cvt(pretrained=False)
+                self.network.head = nn.Linear(384, num_classes)
+            else:
+                raise NotImplementedError
+            ginit = GradInitWrapper(self.network)
+            ginit.detach() 
+        elif hparams['weight_init']=="trunc_normal":
+            if hparams['backbone']=="DeitSmall":
+                self.network = deit_small_patch16_224(pretrained=False)
+                self.n_outputs = 384
+                self.network.head = Classifier(self.n_outputs, num_classes,init=hparams['weight_init'])
+            elif hparams['backbone']=="CVTSmall":
+                self.network = small_cvt(pretrained=False,init="xavier")
+                self.network.head = nn.Linear(384, num_classes)
+            else:
+                raise NotImplementedError
+            self.apply(self._init_weights_trunc_normal)
+        elif hparams['weight_init']=="kaiming_normal":
+            if hparams['backbone']=="DeitSmall":
+                self.network = deit_small_patch16_224(pretrained=False)
+                self.n_outputs = 384
+                self.network.head = Classifier(self.n_outputs, num_classes,init=hparams['weight_init'])
+            elif hparams['backbone']=="CVTSmall":
+                self.network = small_cvt(pretrained=False,init="xavier")
+                self.network.head = nn.Linear(384, num_classes)
+            else:
+                raise NotImplementedError
+            self.apply(self._init_weights_kaiming_normal)
         # self.network = remove_batch_norm_from_resnet(self.network)
 
         self.freeze_bn()
         self.hparams = hparams
         self.dropout = nn.Dropout(hparams['resnet_dropout'])
 
+    def _init_weights_xavier_uniform(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.xavier_uniform_(module.weight)
+            if module.bias is not None:
+                torch.nn.init.xavier_uniform_(module.bias)
+    def _init_weights_uniform(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.uniform_(module.weight)
+            if module.bias is not None:
+                torch.nn.init.uniform_(module.bias)
+
+    def _init_weights_trunc_normal(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.trunc_normal_(module.weight,std=.02)
+            if module.bias is not None:
+                torch.nn.init.trunc_normal_(module.bias,std=.02)
+    def _init_weights_kaiming_normal(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.kaiming_normal_(module.weight,std=.02)
+            if module.bias is not None:
+                torch.nn.init.kaiming_normal_(module.bias,std=.02)
     def forward(self, x):
         """Encode x into a feature vector of size n_outputs."""
         # return self.dropout(self.network(x))
