@@ -1,149 +1,77 @@
 #!/bin/bash
-#SBATCH --job-name=Clip_mixup_with_text
+#SBATCH --job-name=domainNet
 #SBATCH --gres gpu:9
 #SBATCH --nodes 1
-#SBATCH --cpus-per-task=54
+#SBATCH --cpus-per-task=45
 #SBATCH --partition=multigpu
 
-# for dataset in PACS VLCS OfficeHome TerraIncognita DomainNet
+
+
+# for dataset in DomainNet 
 # do
-#     for lr in 0.00005 0.000005 0.000001 0.00001
+#     for lr in 0.00005 
 #     do
 #         for command in delete_incomplete launch
 #         do
 #             python -m domainbed.scripts.sweep $command\
-#                 --data_dir=/nfs/users/ext_maryam.sultana/DG_new_idea/domainbed/data \
-#                 --output_dir=./domainbed/outputs_new/clip/ERM_clip_text_conc_Frz-with_sep_net/${dataset}/DeitBase/lr-${lr}\
+#                 --data_dir=/nfs/users/ext_sanoojan.baliah/Sanoojan/DG/data \
+#                 --output_dir=./domainbed/outputs_clip/Deitbase_related_ablations/ERM_Vit_with_clip_mix-0.6/${dataset}/lr-${lr}\
 #                 --command_launcher multi_gpu\
-#                 --algorithms ERM_clip_text_conc_Frz \
+#                 --algorithms ERM_Vit_with_clip_mix \
 #                 --single_test_envs \
 #                 --datasets ${dataset} \
 #                 --n_hparams 1  \
 #                 --n_trials 3 \
-#                 --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":${lr}}"""\
+#                 --hparams """{\"weight_init\":\"ImageNet\",\"backbone\":\"DeitBase\",\"lr\":${lr}}"""\
 #                 --skip_confirmation  
-#         done > Outs/clipBase-${dataset}-conc.out
+#         done > Outs/DeitBase-${dataset}-ERM_Vit_with_clip_mix.out
 #     done
 # done
 
-# for dataset in  DomainNet
+# for dataset in DomainNet 
 # do
-#     for lr in  0.000005 0.000001 0.00001
+#     for lr in 0.00005 
 #     do
 #         for command in delete_incomplete launch
 #         do
 #             python -m domainbed.scripts.sweep $command\
-#                 --data_dir=/nfs/users/ext_maryam.sultana/DG_new_idea/domainbed/data \
-#                 --output_dir=./domainbed/outputs_new/clip/ERM_clip_text_conc-with_sep_net/${dataset}/DeitBase/lr-${lr}\
+#                 --data_dir=/nfs/users/ext_sanoojan.baliah/Sanoojan/DG/data \
+#                 --output_dir=./domainbed/outputs_clip/Resnet50_related_ablations/ERM_with_clip_mix-0.6/${dataset}/lr-${lr}\
 #                 --command_launcher multi_gpu\
-#                 --algorithms ERM_clip_text_conc \
+#                 --algorithms ERM_with_clip_mix \
 #                 --single_test_envs \
 #                 --datasets ${dataset} \
 #                 --n_hparams 1  \
 #                 --n_trials 3 \
-#                 --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":${lr},\"batch_size\":20}"""\
+#                 --hparams """{\"weight_init\":\"ImageNet\",\"backbone\":\"Resnet50\",\"lr\":${lr}}"""\
 #                 --skip_confirmation  
-#         done > Outs/clipBase-${dataset}-conc-full-2.out
+#         done > Outs/Resnet50-${dataset}-ERM_Vit_with_clip_mix.out
 #     done
 # done
 
-for dataset in  TerraIncognita VLCS OfficeHome PACS 
+for lr in  0.00005 0.0002
 do
-    for lr in  0.000005 
+    for dataset in  DomainNet  
     do
-        for command in delete_incomplete launch
+        for init in kaiming_normal trunc_normal gradinit xavier_uniform 
         do
-            python -m domainbed.scripts.sweep $command\
-                --data_dir=/nfs/users/ext_sanoojan.baliah/Sanoojan/DG/data \
-                --output_dir=./domainbed/outputs_new/Clip_domain_mixup-multiple-0.6-3/${dataset}/lr-${lr}\
-                --command_launcher multi_gpu\
-                --algorithms Clip_domain_mixup \
-                --single_test_envs \
-                --datasets ${dataset} \
-                --n_hparams 1  \
-                --n_trials 3 \
-                --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":${lr},\"batch_size\":32,\"cascaded\":0,\"num_mixups=\":3,\"mixup_weight\":0.6}"""\
-                --skip_confirmation  
-        done > Outs/clipBase-${dataset}-Clip_domain_mixup.out
+            for command in delete_incomplete launch
+            do
+                python -m domainbed.scripts.sweep $command\
+                    --data_dir=/nfs/users/ext_sanoojan.baliah/Sanoojan/DG/data \
+                    --output_dir=./domainbed/outputs_clip/Ablations/Inits-long/ERM/${init}/${dataset}/lr-${lr}\
+                    --command_launcher multi_gpu_10_15\
+                    --algorithms ERM \
+                    --single_test_envs \
+                    --datasets ${dataset} \
+                    --n_hparams 1  \
+                    --steps 20000 \
+                    --n_trials 1  \
+                    --hparams """{\"weight_init\":\"${init}\",\"backbone\":\"Resnet50\",\"lr\":${lr}}"""\
+                    --skip_confirmation  
+            done 
+        done
     done
 done
 
-# for dataset in  DomainNet
-# do
-#     for lr in  0.000005 
-#     do
-#         for command in delete_incomplete launch
-#         do
-#             python -m domainbed.scripts.sweep $command\
-#                 --data_dir=/nfs/users/ext_maryam.sultana/DG_new_idea/domainbed/data \
-#                 --output_dir=./domainbed/outputs_new/ERM_clip_WTC_DPL_test_conf/${dataset}/lr-${lr}\
-#                 --command_launcher multi_gpu\
-#                 --algorithms ERM_clip_WTC_DPL_test_conf \
-#                 --single_test_envs \
-#                 --datasets ${dataset} \
-#                 --n_hparams 1  \
-#                 --n_trials 3 \
-#                 --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":${lr},\"batch_size\":20}"""\
-#                 --skip_confirmation  
-#         done > Outs/clipBase-${dataset}-ERM_clip_WTC_DPL_test_conf.out
-#     done
-# done
-
 # 
-# for dataset in  DomainNet
-# do
-#     for lr in  0.000005 
-#     do
-#         for command in delete_incomplete launch
-#         do
-#             python -m domainbed.scripts.sweep $command\
-#                 --data_dir=/nfs/users/ext_maryam.sultana/DG_new_idea/domainbed/data \
-#                 --output_dir=./domainbed/outputs_new/clip/ERM_clip_patch_tokens_weighted_text_label_confid/${dataset}/DeitBase/lr-${lr}\
-#                 --command_launcher multi_gpu\
-#                 --algorithms ERM_clip_patch_tokens_weighted_text_label_confid \
-#                 --single_test_envs \
-#                 --datasets ${dataset} \
-#                 --n_hparams 1  \
-#                 --n_trials 3 \
-#                 --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":${lr},\"batch_size\":20}"""\
-#                 --skip_confirmation  
-#         done > Outs/clipBase-${dataset}-weighted_confi-20.out
-#     done
-# done
-
-
-
-
-
-# for command in delete_incomplete launch
-# do
-#     python -m domainbed.scripts.sweep $command\
-#         --data_dir=/nfs/users/ext_maryam.sultana/DG_new_idea/domainbed/data \
-#         --output_dir=./domainbed/outputs_new/clip/ERM-low_lr/DomainNet/DeitBase-28\
-#         --command_launcher multi_gpu\
-#         --algorithms ERM_ViT \
-#         --single_test_envs \
-#         --datasets DomainNet \
-#         --n_hparams 1  \
-#         --n_trials 3 \
-#         --hparams """{\"weight_init\":\"clip\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":28}"""\
-#         --skip_confirmation  
-# done > Outs/clipBase-DomainNet-28.out
-
-
-# for command in delete_incomplete launch
-# do
-#     python -m domainbed.scripts.sweep $command\
-#         --data_dir=/nfs/users/ext_maryam.sultana/DG_new_idea/domainbed/data \
-#         --output_dir=./domainbed/outputs_new/candelele\
-#         --command_launcher multi_gpu\
-#         --algorithms ERM_ViT_classifier_learning \
-#         --single_test_envs \
-#         --datasets PACS \
-#         --n_hparams 1  \
-#         --n_trials 3 \
-#         --hparams """{\"weight_init\":\"ImageNet\",\"backbone\":\"DeitBase\"}"""\
-#         --skip_confirmation  
-# done > Outs/imsgenet-pacs_chk.out
-
-#
