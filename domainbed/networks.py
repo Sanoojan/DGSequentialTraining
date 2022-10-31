@@ -325,8 +325,7 @@ class ViT(torch.nn.Module):
     def _init_weights_xavier_uniform(self, module):
         if isinstance(module, nn.Linear):
             torch.nn.init.xavier_uniform_(module.weight)
-            if module.bias is not None:
-                torch.nn.init.xavier_uniform_(module.bias)
+           
     def _init_weights_uniform(self, module):
         if isinstance(module, nn.Linear):
             torch.nn.init.uniform_(module.weight)
@@ -340,9 +339,7 @@ class ViT(torch.nn.Module):
                 torch.nn.init.trunc_normal_(module.bias,std=.02)
     def _init_weights_kaiming_normal(self, module):
         if isinstance(module, nn.Linear):
-            torch.nn.init.kaiming_normal_(module.weight,std=.02)
-            if module.bias is not None:
-                torch.nn.init.kaiming_normal_(module.bias,std=.02)
+            torch.nn.init.kaiming_normal_(module.weight)
     def forward(self, x):
         """Encode x into a feature vector of size n_outputs."""
         # return self.dropout(self.network(x))
