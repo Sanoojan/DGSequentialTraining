@@ -244,6 +244,14 @@ class ViT(torch.nn.Module):
                 self.n_outputs = 768
                 # self.network.proj=nn.Parameter(0.03608439182435161 * torch.randn(768, num_classes))
                 # self.network.proj==None
+            elif hparams['backbone']=="Resnet50":
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                model, preprocess = clip.load('RN50', device)
+                # model=model.float()
+                self.network=model.float()
+                self.n_outputs = 2048
+                # self.network.proj=nn.Parameter(0.03608439182435161 * torch.randn(768, num_classes))
+                # self.network.proj==None
             else:
                 raise NotImplementedError     
         elif hparams['weight_init']=="clip_scratch":

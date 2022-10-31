@@ -41,7 +41,7 @@ def load_model(fname):
         dump["model_num_domains"],
         dump["model_hparams"])
     
-    algorithm.load_state_dict(dump["model_dict"],strict=True)
+    algorithm.load_state_dict(dump["model_dict"],strict=False)
     return algorithm
 
 def polar_features():
@@ -185,7 +185,7 @@ def plot_features(features, labels, num_classes,filename):
             )
             plt.xticks([])
             plt.yticks([])
-    plt.legend(class_names_sel, loc='upper right', bbox_to_anchor=(1.2,1), labelspacing=1.2)
+    plt.legend(class_names_sel, loc='lower left',fontsize="small",handletextpad=0.1,markerscale=2.0,mode = "expand", columnspacing=5.0,ncol = num_classes)
     #dirname = osp.join(args.save_dir, prefix)
     # if not osp.exists(dirname):
     #     os.mkdir(dirname)

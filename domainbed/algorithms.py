@@ -1715,6 +1715,117 @@ class DPLCLIP_mixup_with_text(CLIP):
         text_feature = text_feature / text_feature.norm(dim=-1, keepdim=True)
         return self.clip_model.logit_scale.exp() * image_feature @ text_feature.t()
 
+
+class Clip_train_prompt(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+    
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(Clip_train_prompt, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
+
+        num_prompts=10
+        # self.prompts = nn.Parameter(torch.zeros(1, num_prompts, 512))
+        # self.prompts.requires_grad_()
+        # nn.init.trunc_normal_(self.prompts, std=.02)
+
+        for name,param in self.featurizer.transformer.named_parameters():
+            if name!="prompts":
+                # print(name)
+                param.requires_grad = False
+        
+
+        printNetworkParams(self.featurizer)
+        self.optimizer = torch.optim.AdamW(
+            list(self.featurizer.transformer.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.Class_names=misc.Class_names
+        # print(self.Class_names)
+        self.cnt=0
+        self.num_classes=num_classes
+        prompt_prefix = ' '.join(['X'] * num_prompts)
+        classnames = [f"a photo of a {name.replace('_', ' ')}" for name in self.Class_names]
+        prompts = [prompt_prefix + ' ' + name + '.' for name in classnames]
+        self.tokenized_prompts = torch.cat([clip.tokenize(p) for p in prompts]).to("cuda")
+        with torch.no_grad():
+            embedding = self.featurizer.token_embedding(self.tokenized_prompts).type(self.featurizer.dtype)
+        self.register_buffer('token_prefix', embedding[:, :1, :])  # SOS
+        self.register_buffer('token_suffix', embedding[:, num_prompts + 1:, :])  # CLS, EOS
+
+    def _get_text_features(self, coop=False):
+        #  reshape domain_feature: [7, 16 * self.EMBEDDING_DIM] -> [7, 16, self.EMBEDDING_DIM]
+
+        # domain_feature = domain_feature.reshape(-1, self.hparams['num_domain_tokens'], self.EMBEDDING_DIM)
+
+        # prompt_feature=self.prompts.expand(x.shape[0], -1, -1)
+        prompt_feature=self.featurizer.prompts.expand(self.num_classes, -1, -1)
+        
+        # print(self.token_prefix.shape)
+        # print(prompt_feature.shape)
+        #  reshape domain_feature: [7, 16, self.EMBEDDING_DIM] -> [7, 77, self.EMBEDDING_DIM]
+        prompt_feature = torch.cat([self.token_prefix, prompt_feature, self.token_suffix], dim=1)
+        
+        #  refer CoOp: CoOP github. https://github.com/KaiyangZhou/CoOp/blob/b0a058869cef00a4e4ea5256d40fd7681119c099/trainers/coop.py#L46
+        x = prompt_feature + self.featurizer.positional_embedding.type(self.featurizer.dtype)
+        x = x.permute(1, 0, 2)
+        x = self.featurizer.transformer(x)
+        x = x.permute(1, 0, 2)
+        x = self.featurizer.ln_final(x).type(self.featurizer.dtype)
+        
+        #  mapping domain_features to text_features.
+        text_features = x[torch.arange(x.shape[0]), self.tokenized_prompts.argmax(dim=-1)] @ self.featurizer.text_projection      
+        # print(text_features.shape)
+        return text_features
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        # with torch.no_grad():
+        # text_inputs  = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+        image_features = self.featurizer.encode_image(all_x)
+
+        text_features = self._get_text_features()
+        image_features = image_features @ self.featurizer.visual.proj
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        logit_scale = self.featurizer.logit_scale.exp()
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        loss=F.cross_entropy(logits_per_image, all_y)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        text_inputs = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+        
+        image_features = self.featurizer.encode_image(x)
+        # text_features = self.featurizer.encode_text(text_inputs)
+        text_features = self._get_text_features()
+        # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
+        image_features = image_features @ self.featurizer.visual.proj
+
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+    
+
+        # cosine similarity as logits
+        logit_scale = self.featurizer.logit_scale.exp()
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        
+        return logits_per_image
+
+
+
 class DPLCLIP_mixup_with_text_nofrz(CLIP):
     def __init__(self, input_shape, num_classes, num_domains, hparams, sentence_prompt=True):
         super(DPLCLIP_mixup_with_text_nofrz, self).__init__(input_shape, num_classes, num_domains, hparams)
@@ -3460,7 +3571,7 @@ def load_model(fname):
         dump["model_num_classes"],
         dump["model_num_domains"],
         dump["model_hparams"])
-    algorithm.load_state_dict(dump["model_dict"],strict=True)
+    algorithm.load_state_dict(dump["model_dict"],strict=False)
     return algorithm
 
 class Identity(torch.nn.Module):
