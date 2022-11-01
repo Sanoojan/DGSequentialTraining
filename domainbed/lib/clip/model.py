@@ -150,7 +150,7 @@ class ModifiedResNet(nn.Module):
         x = self.layer3(x)
         x = self.layer4(x)
         x = self.attnpool(x)
-
+   
         return x
 
 
@@ -362,7 +362,7 @@ class CLIP(nn.Module):
         return self.visual.conv1.weight.dtype
 
     def encode_image(self, image,return_all_token=False):
-        return self.visual(image.type(self.dtype),return_all_token=return_all_token)
+        return self.visual(image.type(self.dtype))
 
     def encode_text(self, text,no_embed=False,EOS_pos=None):
         if(no_embed==False):

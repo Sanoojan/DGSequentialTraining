@@ -65,7 +65,7 @@ def get_model(args, pretrained=True):
             model1["model_num_classes"],
             model1["model_num_domains"],
             model1["model_hparams"])
-        algorithm.load_state_dict(model1["model_dict"])
+        algorithm.load_state_dict(model1["model_dict"],strict=False)
         try:
             model = algorithm
         except:

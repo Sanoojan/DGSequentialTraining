@@ -95,7 +95,7 @@ def get_attention_masks(args, image, model,return_attn=False):
     image_features,attentions = model.featurizer.visual(image.cuda(),return_attention=True)
     text_features=model.text_features
     # print(text_features.shape)
-    attentions=attentions[-1].unsqueeze(0)
+    attentions=attentions[-1]
     nh = attentions.shape[1]
 
     # we keep only the output patch attention
@@ -394,7 +394,7 @@ def generate_images_per_model(args, model, device):
             for head_idx, mask_h in enumerate(mask):
                 # print(mask_h.shape)
                 f_name = f"{args.save_path}/{d}/{args.model_name}_{args.threshold}/im_{idx:03d}_{head_idx}.png"
-                f_name_ori = f"{args.save_path}/{d}/{args.model_name}_{args.threshold}/im_{idx:03d}_{head_idx}_ori.png"
+                f_name_ori = f"{args.save_path}/{d}/{args.model_name}_{args.threshold}/im_{idx:03d}_ori.png"
                 display_instances_heatmap(sample, mask_h, fname=f_name,f_name_ori=f_name_ori)
 
 
