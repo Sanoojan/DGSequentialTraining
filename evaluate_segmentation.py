@@ -94,7 +94,7 @@ def get_attention_masks(args, image, model,return_attn=False):
     # attentions=model.get_last_selfattention(image.cuda())
     image_features,attentions = model.featurizer.visual(image.cuda(),return_attention=True)
     text_features=model.text_features
-    print(text_features.shape)
+    # print(text_features.shape)
     attentions=attentions[-1].unsqueeze(0)
     nh = attentions.shape[1]
 
@@ -272,13 +272,20 @@ def display_instances_heatmap(image, attention, fname="test", figsize=(5, 5), bl
     # hetmp=(255.0*np.array(attention).reshape(224,224,1)).astype(np.uint8)
     hetmp = cv.blur(hetmp,(10,10))
     attn=cv.applyColorMap(hetmp,cv.COLORMAP_JET)
+    image=torchvision.transforms.ToPILImage()(image) 
     # image=einops.rearrange(image,'c h w -> h w c')
-    try:
-         resu=cv.addWeighted(np.array(image),0.7,np.array(attn),0.6,0.4)
-         cv.imwrite(fname,resu)
-         cv.imwrite(f_name_ori,image)
-    except:
-        print("An exception occurred")
+    # print(np.array(attn).shape)
+    # print(np.array(image).shape)
+    # print(attn.dtype)
+    # print(image.dtype)
+    # print(f_name_ori)
+    # try:
+    resu=cv.addWeighted(np.array(image),0.7,np.array(attn),0.6,0.4)
+    img_orig=cv.addWeighted(np.array(image),1.0,np.array(attn),0.0,0.0)
+    cv.imwrite(fname,resu)
+    cv.imwrite(f_name_ori,img_orig)
+    # except Exception as e:
+    #     print("An exception occurred:",e)
 
 
    
@@ -365,12 +372,15 @@ def generate_images_per_model(args, model, device):
                     break
                 cnt+=1
                 im_path = f"{args.test_dir}/{d}/{fol_name}/{im_name}"
-                image = Image.open(f"{im_path}").resize((224, 224))
+                image = Image.open(f"{im_path}")
+                # print("size:",image.size)
+                image=image.resize((224, 224))
                 img = torchvision.transforms.functional.to_tensor(image)
+                # print("size:",img.shape)
                 if img.shape[0] == 1:
                     img = torch.cat([img, img, img], dim=0)
                 samples.append(img)
-                original_img.append(image)
+                original_img.append(img)
         samples = torch.stack(samples, 0).to(device)
 
 
@@ -385,7 +395,7 @@ def generate_images_per_model(args, model, device):
                 # print(mask_h.shape)
                 f_name = f"{args.save_path}/{d}/{args.model_name}_{args.threshold}/im_{idx:03d}_{head_idx}.png"
                 f_name_ori = f"{args.save_path}/{d}/{args.model_name}_{args.threshold}/im_{idx:03d}_{head_idx}_ori.png"
-                display_instances_heatmap(sample, mask_h, fname=f_name)
+                display_instances_heatmap(sample, mask_h, fname=f_name,f_name_ori=f_name_ori)
 
 
 def generate_images_per_model_per_block(args, model, device):
