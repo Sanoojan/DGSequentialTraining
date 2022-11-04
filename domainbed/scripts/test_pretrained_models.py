@@ -185,7 +185,8 @@ def plot_features(features, labels, num_classes,filename):
             )
             plt.xticks([])
             plt.yticks([])
-    plt.legend(class_names_sel, loc='lower left',fontsize="small",handletextpad=0.1,markerscale=2.0,mode = "expand", columnspacing=5.0,ncol = num_classes)
+    plt.legend(class_names_sel, loc='upper right', bbox_to_anchor=(1.2,1), labelspacing=1.2)
+    # plt.legend(class_names_sel, loc='lower left',fontsize="small",handletextpad=0.1,markerscale=2.0,mode = "expand", columnspacing=5.0,ncol = num_classes)
     #dirname = osp.join(args.save_dir, prefix)
     # if not osp.exists(dirname):
     #     os.mkdir(dirname)
@@ -259,10 +260,11 @@ if __name__ == "__main__":
     parser.add_argument('--confusion_matrix', type=bool, default=False)
     parser.add_argument('--test_robustness', type=bool, default=False)
     parser.add_argument('--accuracy', type=bool, default=False)
-    parser.add_argument('--tsne', type=bool, default=True)
+    parser.add_argument('--tsne', type=bool, default=False)
     parser.add_argument('--flatness', type=bool, default=False)
     parser.add_argument('--polar', type=bool, default=False)
     parser.add_argument('--segmentation', type=bool, default=False)
+    parser.add_argument('--similarity', type=bool, default=True)
     parser.add_argument('--tsneOut_dir', type=str, default="./domainbed/tsneOuts/clip_train")
     args = parser.parse_args()
     args.tsneOut_dir="./domainbed/tsneOuts/feat2/"+args.dataset+"/"+args.algorithm
@@ -404,14 +406,19 @@ if __name__ == "__main__":
 
 
     algorithm_class = algorithms.get_algorithm_class(args.algorithm)
+    algorithm = algorithm_class(dataset.input_shape, dataset.num_classes,
+        len(dataset) - len(args.test_envs), hparams)
     if args.algorithm=="Testing":
         fname=args.pretrained
-        algorithm =load_model(fname)
+        if fname is not None:
+            algorithm =load_model(fname)
         args.algorithm=type(algorithm).__name__
         args.algo_name=args.algorithm
     else:
         fname=args.pretrained
-        algorithm =load_model(fname)
+        if fname is not None:
+            algorithm =load_model(fname)
+            
         args.algorithm=type(algorithm).__name__
         args.algo_name=args.algorithm
         # algorithm = algorithm_class(dataset.input_shape, dataset.num_classes,
@@ -420,6 +427,7 @@ if __name__ == "__main__":
 
     if algorithm_dict is not None:
         algorithm.load_state_dict(algorithm_dict)
+        
 
     algorithm.to(device)
 
@@ -504,6 +512,21 @@ if __name__ == "__main__":
             acc = misc.accuracy(algorithm, loader, weights, device)
             # print(algo_name,":",name,":",acc)
             results[name+'_acc'] = acc
+        elif(args.similarity):
+            # Tsne
+            if(int(name[3]) not in args.test_envs and  "in" in name):
+                continue
+            if(int(name[3]) in args.test_envs and  "out" in name):
+                continue
+            # print(name)
+            Features,labels=misc.TsneFeatures(algorithm, loader, weights, device,args.output_dir,env_name,algo_name,polar=False)
+            for i in range(len(labels)):
+                Features_all.append(Features[i])
+                labels_all.append(int(str(labels[i])))
+            # if (env_name[-1] in args.test_envs):
+
+                
+
         elif(args.polar):
             # if(int(name[3]) not in args.test_envs and  "in" in name ):
             #     continue
@@ -696,7 +719,53 @@ if __name__ == "__main__":
             
              
         visualizeEd(Features_all, labels_all,tokenlabels,name_conv+".jpg",args.tsneOut_dir)
-      
+
+    elif args.similarity:
+        Similarities=[]
+        Class_features_sep=[]
+        # print("similarities")
+        for i in range(dataset.num_classes):
+            
+            labelscls=np.array(labels_all)
+            # labelscls=labels%10
+            # print(labelscls)
+            Features_all=np.array(Features_all)
+            # print(Features_all.shape)
+            class_features=Features_all[labelscls==i]
+            class_features=class_features-np.mean(class_features,axis=0,keepdims=True)
+            Class_features_sep.append(class_features)
+            # print(class_features.shape)
+            class_feat_tran=np.transpose(class_features)
+            # print(class_feat_tran.shape)
+
+            # similarity=np.dot(class_features , class_feat_tran)
+            # # print("similarity,feat:",similarity.shape)
+            # n = similarity.shape[1]
+            # overall_sim=(np.concatenate(np.absolute(similarity)).sum()-n)/(n*n-n)
+            # print(overall_sim)
+            # Similarities.append(overall_sim)
+
+        # print("Similarities classwise:",Similarities)
+        # print("mean_similarity:",np.mean(np.array(Similarities)))
+        Intra_class_sim=np.zeros((len(Class_features_sep),len(Class_features_sep)))
+        for i in range(len(Class_features_sep)):
+            for j in range(len(Class_features_sep)):
+                
+                similarity=np.dot(Class_features_sep[i] , np.transpose(Class_features_sep[j]))
+                # print("similarity,feat:",similarity.shape)
+                n = similarity.shape[1]
+                Out_sim=np.concatenate(np.absolute(similarity)).mean()
+                # print(Out_sim)
+                Intra_class_sim[i][j]=Out_sim
+        print(Intra_class_sim)
+        class_wise_ratio=[]
+        for i in range(len(Class_features_sep)):
+            ratio=Intra_class_sim[i][i]/np.mean(Intra_class_sim[i])
+            class_wise_ratio.append(ratio)
+        print("class_wise_ratio: ",class_wise_ratio)
+        print("average_ratio:  ",np.mean(np.array(class_wise_ratio)))
+    
+
 
     with open(os.path.join(args.output_dir, 'done'), 'w') as f:
         f.write('done')

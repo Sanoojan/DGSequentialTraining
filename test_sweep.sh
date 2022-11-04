@@ -3,29 +3,90 @@
 # for Wd in 0.05 0.2 0.5 1.5
 # do
 
+
+
 python -m domainbed.scripts.test_sweep launch\
     --data_dir=/share/data/drive_2/DG/data \
-    --output_dir=./domainbed/outputs_clip/Clip_train/TerraIncognita/lr-0.000005 \
+    --output_dir=./domainbed/outputs_clip/Clip_train/DomainNet/lr-0.000005 \
     --command_launcher gpu_4\
     --algorithms Clip_train\
     --single_test_envs \
-    --datasets TerraIncognita \
+    --datasets DomainNet \
     --n_hparams 1  \
     --n_trials 3 \
     --skip_confirmation \
     --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
 
+python -m domainbed.scripts.test_sweep launch\
+    --data_dir=/share/data/drive_2/DG/data \
+    --output_dir=./domainbed/outputs_clip/Clip_train_mixup_with_text_ft_uniform/DomainNet/lr-0.000005 \
+    --command_launcher gpu_4\
+    --algorithms Clip_train_mixup_with_text\
+    --single_test_envs \
+    --datasets DomainNet \
+    --n_hparams 1  \
+    --n_trials 3 \
+    --skip_confirmation \
+    --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
+
+python -m domainbed.scripts.test_sweep launch\
+    --data_dir=/share/data/drive_2/DG/data \
+    --output_dir=./domainbed/outputs_clip/Clip_zero_shot/DomainNet\
+    --command_launcher gpu_0\
+    --algorithms clip_zero_shot \
+    --single_test_envs \
+    --datasets DomainNet \
+    --n_hparams 1  \
+    --n_trials 3 \
+    --skip_confirmation \
+    --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\"}"""\ 
+
 # python -m domainbed.scripts.test_sweep launch\
 #     --data_dir=/share/data/drive_2/DG/data \
-#     --output_dir=./domainbed/outputs_clip/Clip_train_text_freeze/TerraIncognita/lr-0.000005 \
+#     --output_dir=./domainbed/outputs_clip/Clip_train_text_freeze/VLCS/lr-0.000005 \
 #     --command_launcher gpu_0\
-#     --algorithms Clip_train_text_freeze\
+#     --algorithms Clip_train\
 #     --single_test_envs \
-#     --datasets TerraIncognita \
+#     --datasets VLCS \
 #     --n_hparams 1  \
 #     --n_trials 3 \
 #     --skip_confirmation \
 #     --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005}"""\
+
+# python -m domainbed.scripts.test_sweep launch\
+#     --data_dir=/share/data/drive_2/DG/data \
+#     --output_dir=./domainbed/outputs_clip/Clip_zero_shot/VLCS\
+#     --command_launcher gpu_0\
+#     --algorithms clip_zero_shot \
+#     --single_test_envs \
+#     --datasets VLCS \
+#     --n_hparams 1  \
+#     --n_trials 3 \
+#     --skip_confirmation \
+#     --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\"}"""\ 
+
+# for dataset in PACS VLCS  OfficeHome TerraIncognita 
+# do
+#     for lr in  0.000005 
+#     do
+#         for command in  launch
+#         do
+#             python -m domainbed.scripts.test_sweep $command\
+#                 --data_dir=/share/data/drive_2/DG/data \
+#                 --output_dir=./domainbed/outputs_clip/Clip_zero_shot/${dataset}\
+#                 --command_launcher multi_gpu_0_3\
+#                 --algorithms clip_zero_shot \
+#                 --single_test_envs \
+#                 --datasets ${dataset} \
+#                 --n_hparams 1  \
+#                 --n_trials 3 \
+#                 --skip_confirmation \
+#                 --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\"}"""\ 
+#         done 
+#     done
+# done
+
+
 
 
 # python -m domainbed.scripts.test_sweep launch\

@@ -875,6 +875,43 @@ class Clip_train(Algorithm):
         
         return logits_per_image
 
+class Clip_train_text_freeze(Clip_train):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(Clip_train, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+class clip_zero_shot(Clip_train):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(Clip_train, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+    
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
+        if(self.hparams['weight_init']=="clip_full"):
+            print("clip_full")
+            # self.featurizer.network.proj=None
+
+        printNetworkParams(self.featurizer)
+        self.optimizer = torch.optim.AdamW(
+            list(self.featurizer.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.Class_names=misc.Class_names
+        with torch.no_grad():
+            text_inputs  = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+            self.text_features = self.featurizer.encode_text(text_inputs)
+        # print(self.Class_names)
+        self.cnt=0
+    def update(self, minibatches, unlabeled=None):
+        return None
+
+    
 
 class Clip_train_mixup(Algorithm):
     """
@@ -1087,8 +1124,6 @@ class Clip_train_mixup_with_text_RN50(Clip_train_mixup_with_text):
     """
     
 
-
-    
     def update(self, minibatches, unlabeled=None):
         all_x = torch.cat([x for x,y in minibatches])
         all_y = torch.cat([y for x,y in minibatches])
@@ -1163,7 +1198,30 @@ class Clip_train_mixup_with_text_RN50(Clip_train_mixup_with_text):
         
         return logits_per_image
 
+class Clip_train_RN50(Clip_train_mixup_with_text_RN50):
 
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        # print(all_y)
+        image_features = self.featurizer.encode_image(all_x)
+        text_features = self.text_features
+       
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        logit_scale = self.featurizer.logit_scale.exp()
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+
+        loss=F.cross_entropy(logits_per_image, all_y)
+
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+        return {'loss': loss.item()}
+        
 class Clip_train_mixup_with_text_hetro(Algorithm):
     """
     Empirical Risk Minimization (ERM)

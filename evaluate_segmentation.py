@@ -14,6 +14,7 @@ import matplotlib.gridspec as gridspec
 from matplotlib.patches import Polygon
 from skimage.measure import find_contours
 from torch.nn.functional import interpolate
+import domainbed.lib.clip.clip as clip
 from tqdm import tqdm
 import cv2 as cv
 import torch.nn as nn
@@ -92,8 +93,8 @@ def get_attention_masks(args, image, model,return_attn=False):
     
 
     # attentions=model.get_last_selfattention(image.cuda())
-    image_features,attentions = model.featurizer.visual(image.cuda(),return_attention=True)
-    text_features=model.text_features
+    image_features,attentions = model.visual(image.cuda(),return_attention=True)
+    # text_features=model.text_features
     # print(text_features.shape)
     attentions=attentions[-1]
     nh = attentions.shape[1]
@@ -544,7 +545,12 @@ if __name__ == '__main__':
     if opt.use_shape:
         assert opt.is_dist, "shape token only present in distilled models"
 
-    if opt.rand_init:
+    if opt.pretrained_weights=="":
+        print("Zero shot model")
+        model, preprocess = clip.load('ViT-B/16', device)
+        # model=model.float()
+        model=model.float()
+    elif opt.rand_init:
         model, mean, std = get_model(opt, pretrained=False)
     else:
         model, mean, std = get_model(opt)

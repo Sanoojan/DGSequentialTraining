@@ -76,10 +76,12 @@ if __name__ == "__main__":
     for k, v in sorted(vars(args).items()):
         print('\t{}: {}'.format(k, v))
     
+    
     if(args.algorithm)=="zero_shot_eval":
         zero_shot=True
     else:
         zero_shot=False
+    # zero_shot=True
 
     if args.hparams_seed == 0:
         hparams = hparams_registry.default_hparams(args.algorithm, args.dataset)
@@ -279,6 +281,7 @@ if __name__ == "__main__":
     best_val_acc=0
 
     if (zero_shot):
+        print("zero_shot")
         step_start_time = time.time()
         minibatches_device = [(x.to(device), y.to(device))
             for x,y in next(train_minibatches_iterator)]
@@ -331,7 +334,7 @@ if __name__ == "__main__":
             print("Time taken to train: ",str((stop_time-start_time)/60.0)," minutes")
             with open(os.path.join(args.output_dir, 'done'), 'w') as f:
                 f.write('done')
-            exit()
+        exit()
 
 
     for step in range(start_step, n_steps):
