@@ -723,6 +723,8 @@ if __name__ == "__main__":
     elif args.similarity:
         Similarities=[]
         Class_features_sep=[]
+        Mean_dif_features_sep=[]
+        mean_overall=np.mean(np.concatenate(Features_all))
         # print("similarities")
         for i in range(dataset.num_classes):
             
@@ -732,8 +734,10 @@ if __name__ == "__main__":
             Features_all=np.array(Features_all)
             # print(Features_all.shape)
             class_features=Features_all[labelscls==i]
-            class_features=class_features-np.mean(class_features,axis=0,keepdims=True)
-            Class_features_sep.append(class_features)
+            class_features_2=class_features-np.mean(class_features,axis=0,keepdims=True)
+            Mean_dif_feat=class_features-mean_overall
+            Mean_dif_features_sep.append(Mean_dif_feat)
+            Class_features_sep.append(class_features_2)
             # print(class_features.shape)
             class_feat_tran=np.transpose(class_features)
             # print(class_feat_tran.shape)
@@ -748,23 +752,149 @@ if __name__ == "__main__":
         # print("Similarities classwise:",Similarities)
         # print("mean_similarity:",np.mean(np.array(Similarities)))
         Intra_class_sim=np.zeros((len(Class_features_sep),len(Class_features_sep)))
+        Inter_class_var=np.zeros((len(Class_features_sep),len(Class_features_sep)))
         for i in range(len(Class_features_sep)):
             for j in range(len(Class_features_sep)):
                 
                 similarity=np.dot(Class_features_sep[i] , np.transpose(Class_features_sep[j]))
+                Inter_class_var=np.dot(Mean_dif_features_sep[i] , np.transpose(Mean_dif_features_sep[j]))
                 # print("similarity,feat:",similarity.shape)
                 n = similarity.shape[1]
                 Out_sim=np.concatenate(np.absolute(similarity)).mean()
+                Out_inter_var=np.concatenate(np.absolute(Inter_class_var)).mean()
                 # print(Out_sim)
-                Intra_class_sim[i][j]=Out_sim
+                
+                if(i==j):
+                    Intra_class_sim[i][j]=Out_sim
+                else:
+                    Intra_class_sim[i][j]=Out_inter_var
         print(Intra_class_sim)
         class_wise_ratio=[]
         for i in range(len(Class_features_sep)):
-            ratio=Intra_class_sim[i][i]/np.mean(Intra_class_sim[i])
+            ratio=(len(Class_features_sep)-1)*Intra_class_sim[i][i]/(np.sum(Intra_class_sim[i])-Intra_class_sim[i][i])
             class_wise_ratio.append(ratio)
         print("class_wise_ratio: ",class_wise_ratio)
         print("average_ratio:  ",np.mean(np.array(class_wise_ratio)))
+
+    # elif args.similarity:
+    #     Similarities=[]
+    #     Class_features_sep=[]
+    #     Mean_dif_features_sep=[]
+    #     mean_overall=np.mean(np.concatenate(Features_all))
+    #     # print("similarities")
+    #     for i in range(dataset.num_classes):
+            
+    #         labelscls=np.array(labels_all)
+    #         # labelscls=labels%10
+    #         # print(labelscls)
+    #         Features_all=np.array(Features_all)
+    #         # print(Features_all.shape)
+    #         class_features=Features_all[labelscls==i]
+    #         class_features_2=class_features-np.mean(class_features,axis=0,keepdims=True)
+    #         Mean_dif_feat=class_features-mean_overall
+    #         Mean_dif_features_sep.append(Mean_dif_feat)
+    #         Class_features_sep.append(class_features_2)
+    #         # print(class_features.shape)
+    #         class_feat_tran=np.transpose(class_features)
+    #         # print(class_feat_tran.shape)
+
+    #         # similarity=np.dot(class_features , class_feat_tran)
+    #         # # print("similarity,feat:",similarity.shape)
+    #         # n = similarity.shape[1]
+    #         # overall_sim=(np.concatenate(np.absolute(similarity)).sum()-n)/(n*n-n)
+    #         # print(overall_sim)
+    #         # Similarities.append(overall_sim)
+
+    #     # print("Similarities classwise:",Similarities)
+    #     # print("mean_similarity:",np.mean(np.array(Similarities)))
+    #     Intra_class_sim=np.zeros((len(Class_features_sep),len(Class_features_sep)))
+    #     Inter_class_var=np.zeros((len(Class_features_sep),len(Class_features_sep)))
+    #     for i in range(len(Class_features_sep)):
+    #         for j in range(len(Class_features_sep)):
+                
+    #             similarity=np.dot(Class_features_sep[i] , np.transpose(Class_features_sep[j]))
+    #             Inter_class_var=np.dot(Mean_dif_features_sep[i] , np.transpose(Mean_dif_features_sep[j]))
+    #             # print("similarity,feat:",similarity.shape)
+    #             n = similarity.shape[1]
+    #             Out_sim=np.concatenate(np.absolute(similarity)).mean()
+    #             Out_inter_var=np.concatenate(np.absolute(Inter_class_var)).mean()
+    #             # print(Out_sim)
+                
+    #             if(i==j):
+    #                 Intra_class_sim[i][j]=Out_sim
+    #             else:
+    #                 Inter_class_var[i][j]=Out_inter_var
+    #     print(Intra_class_sim)
+    #     class_wise_ratio=[]
+    #     for i in range(len(Class_features_sep)):
+    #         ratio=Intra_class_sim[i][i]/np.mean(Inter_class_var[i])
+    #         class_wise_ratio.append(ratio)
+    #     print("class_wise_ratio: ",class_wise_ratio)
+    #     print("average_ratio:  ",np.mean(np.array(class_wise_ratio)))
     
+    # elif args.similarity:
+    #     print("LDA...............................")
+    #     Similarities=[]
+    #     Class_features_sep=[]
+    #     class_mean_feat=[]
+    #     Features_all=np.array(Features_all)
+    #     mean_overall=np.mean(np.concatenate(Features_all))
+    #     print("mean_overall")
+    #     # print("similarities")
+        
+    #     for i in range(dataset.num_classes):
+            
+    #         labelscls=np.array(labels_all)
+    #         # labelscls=labels%10
+    #         # print(labelscls)
+            
+    #         # print(Features_all.shape)
+    #         class_features=Features_all[labelscls==i]
+    #         class_mean_feat.append(np.mean(class_features,axis=0)-mean_overall)
+    #         class_features=class_features-np.mean(class_features,axis=0,keepdims=True)
+    #         Class_features_sep.append(class_features)
+    #         # print(class_features.shape)
+    #         class_feat_tran=np.transpose(class_features)
+    #         # print(class_feat_tran.shape)
+
+    #         # similarity=np.dot(class_features , class_feat_tran)
+    #         # # print("similarity,feat:",similarity.shape)
+    #         # n = similarity.shape[1]
+    #         # overall_sim=(np.concatenate(np.absolute(similarity)).sum()-n)/(n*n-n)
+    #         # print(overall_sim)
+    #         # Similarities.append(overall_sim)
+
+    #     # print("Similarities classwise:",Similarities)
+    #     # print("mean_similarity:",np.mean(np.array(Similarities)))
+    #     Intra_class_sim=np.zeros((len(Class_features_sep),len(Class_features_sep)))
+    #     Intra_class_fdv=np.zeros((len(Class_features_sep),len(Class_features_sep)))
+    #     fDV=0
+    #     for i in range(len(Class_features_sep)):
+    #         for j in range(len(Class_features_sep)):
+    #             if(i==j):
+    #                 continue
+    #             SBi=np.dot(Class_features_sep[i] , np.transpose(Class_features_sep[i]))
+    #             SBj=np.dot(Class_features_sep[i] , np.transpose(Class_features_sep[i]))
+    #             SBi=np.concatenate(np.absolute(SBi)).mean()
+    #             SBj=np.concatenate(np.absolute(SBj)).mean()
+    #             SW=np.dot(class_mean_feat[i] , np.transpose(class_mean_feat[j]))
+    #             fDV+=SW/(SBi+SBj)
+    #             Intra_class_fdv[i][j]=SW/(SBi+SBj)
+    #             similarity=np.dot(Class_features_sep[i] , np.transpose(Class_features_sep[j]))
+    #             # print("similarity,feat:",similarity.shape)
+    #             n = similarity.shape[1]
+    #             Out_sim=np.concatenate(np.absolute(similarity)).mean()
+    #             # print(Out_sim)
+    #             Intra_class_sim[i][j]=Out_sim
+    #     print(Intra_class_fdv)
+    #     class_wise_ratio=[]
+    #     for i in range(len(Class_features_sep)):
+    #         ratio=Intra_class_sim[i][i]/np.mean(Intra_class_sim[i])
+    #         class_wise_ratio.append(ratio)
+    #     print("class_wise_ratio: ",class_wise_ratio)
+    #     print("average_ratio:  ",np.mean(np.array(class_wise_ratio)))
+
+    #     print("fDV:",fDV/(len(Class_features_sep)*len(Class_features_sep)-len(Class_features_sep)))
 
 
     with open(os.path.join(args.output_dir, 'done'), 'w') as f:

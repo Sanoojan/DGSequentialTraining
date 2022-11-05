@@ -3,44 +3,44 @@
 # for Wd in 0.05 0.2 0.5 1.5
 # do
 
+for dataset in PACS VLCS
+do
+    python -m domainbed.scripts.test_sweep launch\
+        --data_dir=/share/data/drive_2/DG/data \
+        --output_dir=./domainbed/outputs_clip/Clip_train/${dataset}/lr-0.000005 \
+        --command_launcher gpu_0\
+        --algorithms Clip_train\
+        --single_test_envs \
+        --datasets ${dataset} \
+        --n_hparams 1  \
+        --n_trials 1 \
+        --skip_confirmation \
+        --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
 
+    python -m domainbed.scripts.test_sweep launch\
+        --data_dir=/share/data/drive_2/DG/data \
+        --output_dir=./domainbed/outputs_clip/Clip_train_mixup_with_text_ft_uniform/${dataset}/lr-0.000005 \
+        --command_launcher gpu_1\
+        --algorithms Clip_train_mixup_with_text\
+        --single_test_envs \
+        --datasets ${dataset} \
+        --n_hparams 1  \
+        --n_trials 1 \
+        --skip_confirmation \
+        --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
 
-python -m domainbed.scripts.test_sweep launch\
-    --data_dir=/share/data/drive_2/DG/data \
-    --output_dir=./domainbed/outputs_clip/Clip_train/DomainNet/lr-0.000005 \
-    --command_launcher gpu_4\
-    --algorithms Clip_train\
-    --single_test_envs \
-    --datasets DomainNet \
-    --n_hparams 1  \
-    --n_trials 3 \
-    --skip_confirmation \
-    --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
-
-python -m domainbed.scripts.test_sweep launch\
-    --data_dir=/share/data/drive_2/DG/data \
-    --output_dir=./domainbed/outputs_clip/Clip_train_mixup_with_text_ft_uniform/DomainNet/lr-0.000005 \
-    --command_launcher gpu_4\
-    --algorithms Clip_train_mixup_with_text\
-    --single_test_envs \
-    --datasets DomainNet \
-    --n_hparams 1  \
-    --n_trials 3 \
-    --skip_confirmation \
-    --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
-
-python -m domainbed.scripts.test_sweep launch\
-    --data_dir=/share/data/drive_2/DG/data \
-    --output_dir=./domainbed/outputs_clip/Clip_zero_shot/DomainNet\
-    --command_launcher gpu_0\
-    --algorithms clip_zero_shot \
-    --single_test_envs \
-    --datasets DomainNet \
-    --n_hparams 1  \
-    --n_trials 3 \
-    --skip_confirmation \
-    --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\"}"""\ 
-
+    python -m domainbed.scripts.test_sweep launch\
+        --data_dir=/share/data/drive_2/DG/data \
+        --output_dir=./domainbed/outputs_clip/Clip_zero_shot/${dataset}\
+        --command_launcher gpu_0\
+        --algorithms clip_zero_shot \
+        --single_test_envs \
+        --datasets ${dataset} \
+        --n_hparams 1  \
+        --n_trials 1 \
+        --skip_confirmation \
+        --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\"}"""\ 
+done
 # python -m domainbed.scripts.test_sweep launch\
 #     --data_dir=/share/data/drive_2/DG/data \
 #     --output_dir=./domainbed/outputs_clip/Clip_train_text_freeze/VLCS/lr-0.000005 \
