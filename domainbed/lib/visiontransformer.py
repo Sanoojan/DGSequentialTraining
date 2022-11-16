@@ -375,12 +375,15 @@ class VisionTransformer(nn.Module):
     def forward(self, x,ret_feat=False):
         x = self.forward_features(x)
         if(ret_feat):
+            if self.head_dist is not None:
+                return (x[0]+x[1])/2
             return x
         if self.head_dist is not None:
             x, x_dist = self.head(x[0]), self.head_dist(x[1])  # x must be a tuple
             if self.training and not torch.jit.is_scripting():
                 # during inference, return the average of both classifier predictions
-                return x, x_dist
+         
+                return (x + x_dist) / 2
             else:
                 return (x + x_dist) / 2
         else:

@@ -204,6 +204,12 @@ class ViT(torch.nn.Module):
                 self.network = deit_base_patch16_224(pretrained=True)
                 self.network.head = nn.Linear(768, num_classes)
                 self.n_outputs = 768
+            elif hparams['backbone']=="DeitBase_dist":
+                self.network = deit_base_distilled_patch16_224(pretrained=True)
+                self.network.head = nn.Linear(768, num_classes)
+                self.network.head_dist = nn.Linear(768, num_classes)
+                self.n_outputs = 768
+            
             else:
                 raise NotImplementedError
         elif hparams['weight_init']=="ImageNet21k":
@@ -249,7 +255,7 @@ class ViT(torch.nn.Module):
                 model, preprocess = clip.load('RN50', device)
                 # model=model.float()
                 self.network=model.float()
-                self.n_outputs = 2048
+                self.n_outputs = 1024
                 # self.network.proj=nn.Parameter(0.03608439182435161 * torch.randn(768, num_classes))
                 # self.network.proj==None
             else:

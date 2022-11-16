@@ -3,7 +3,7 @@
 # for Wd in 0.05 0.2 0.5 1.5
 # do
 
-for dataset in PACS VLCS
+for dataset in VLCS PACS
 do
     python -m domainbed.scripts.test_sweep launch\
         --data_dir=/share/data/drive_2/DG/data \
@@ -13,7 +13,7 @@ do
         --single_test_envs \
         --datasets ${dataset} \
         --n_hparams 1  \
-        --n_trials 1 \
+        --n_trials 3 \
         --skip_confirmation \
         --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
 
@@ -25,7 +25,7 @@ do
         --single_test_envs \
         --datasets ${dataset} \
         --n_hparams 1  \
-        --n_trials 1 \
+        --n_trials 3 \
         --skip_confirmation \
         --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
 
@@ -37,7 +37,7 @@ do
         --single_test_envs \
         --datasets ${dataset} \
         --n_hparams 1  \
-        --n_trials 1 \
+        --n_trials 3 \
         --skip_confirmation \
         --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\"}"""\ 
 done

@@ -19,7 +19,7 @@
 # done
 # done
 
-for dataset in PACS
+for dataset in TerraIncognita 
 do 
 for pretr in Clip_zero_shot
 do
@@ -28,9 +28,9 @@ do
         CUDA_VISIBLE_DEVICES=0 python evaluate_segmentation.py \
           --model_name "Clip_zero_shot" \
           --pretrained_weights ""\
-          --threshold 0.2\
+          --threshold 0.75\
           --patch_size 16 \
-          --test_dir "/share/data/drive_2/DG/data/PACS" \
+          --test_dir "/share/data/drive_2/DG/data/terra_incognita" \
           --save_path "AttentionVis/${dataset}/${pretr}"\
           --use_shape\
           --jacard_out "jaccard/${dataset}" \

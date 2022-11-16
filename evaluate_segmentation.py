@@ -24,7 +24,7 @@ from domainbed.lib.utils import get_voc_dataset, get_model, parse_args
 # from domainbed.visiontransformer import VisionTransformer
 import domainbed.algorithms as algorithms
 from domainbed.lib import misc
-misc.Class_names=["dog"]
+
 def jaccard_index(true, logits, eps=1e-7):
     """Computes the Jaccard loss, a.k.a the IoU loss.
     Note that PyTorch optimizers minimize a loss. In this
@@ -94,7 +94,7 @@ def get_attention_masks(args, image, model,return_attn=False):
 
     # attentions=model.get_last_selfattention(image.cuda())
     image_features,attentions = model.visual(image.cuda(),return_attention=True)
-    # text_features=model.text_features
+    text_features=model.text_features
     # print(text_features.shape)
     attentions=attentions[-1]
     nh = attentions.shape[1]
@@ -355,7 +355,7 @@ def display_instances(image, mask, fname="test", figsize=(5, 5), blur=False, con
     
 
 
-def generate_images_per_model(args, model, device):
+def generate_images_per_model(args, model, device,domain=""):
 
     model.to(device)
     model.eval()
@@ -364,12 +364,14 @@ def generate_images_per_model(args, model, device):
     environments = sorted(environments)
     print('env', environments)
     for d in environments:
+        if (domain!=d):
+            continue
         samples = []
         original_img=[]
         for fol_name in tqdm(os.listdir(args.test_dir+"/"+d)):
             cnt=0
             for im_name in tqdm(os.listdir(args.test_dir+"/"+d+"/"+fol_name)):
-                if(cnt>5):
+                if(cnt>15):
                     break
                 cnt+=1
                 im_path = f"{args.test_dir}/{d}/{fol_name}/{im_name}"
@@ -561,10 +563,12 @@ if __name__ == '__main__':
         # # msg = model.load_state_dict(state_dict["model"], strict=False)
         # # print(msg)
     
+    # misc.Class_names=["bird","bobcat","cat","coyote","dog","empty","oppossum","rabit","raccoon","squirrel"]
+    misc.Class_names=["bird","car","chair","dog","person"]
     
 
     if opt.generate_images:
-        generate_images_per_model(opt, model, device)
+        generate_images_per_model(opt, model, device,domain)
     elif opt.generate_images_blockwise:
         generate_images_per_model_per_block(opt, model, device)
     elif opt.generate_images_block_asbatch:
