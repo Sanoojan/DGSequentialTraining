@@ -690,12 +690,14 @@ class ConvolutionalVisionTransformer(nn.Module):
             return outputs,outputs_di
         return outputs
 
-    def forward(self, x):
+    def forward(self, x,ret_feat=False):
         if self.di_token :
             outputs,outputs_di=self.forward_features(x)
         else:
             outputs = self.forward_features(x)
-        x = [self.head(out) for out in outputs]
+        if(ret_feat):
+            return outputs[-1]
+        # x = [self.head(out) for out in outputs]
         # print(x.shape(name=None))
         if self.di_token :
             return x[-1],self.head_DI(outputs_di[-1])

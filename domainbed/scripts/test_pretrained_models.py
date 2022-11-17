@@ -185,8 +185,8 @@ def plot_features(features, labels, num_classes,filename):
             )
             plt.xticks([])
             plt.yticks([])
-    plt.legend(class_names_sel, loc='upper right', bbox_to_anchor=(1.2,1), labelspacing=1.2)
-    # plt.legend(class_names_sel, loc='lower left',fontsize="small",handletextpad=0.1,markerscale=2.0,mode = "expand", columnspacing=5.0,ncol = num_classes)
+    # plt.legend(class_names_sel, loc='upper right', bbox_to_anchor=(1.2,1), labelspacing=1.2)
+    plt.legend(class_names_sel, loc='lower left',fontsize="small",handletextpad=0.1,markerscale=2.0,mode = "expand", columnspacing=5.0,ncol = num_classes)
     #dirname = osp.join(args.save_dir, prefix)
     # if not osp.exists(dirname):
     #     os.mkdir(dirname)
@@ -259,15 +259,15 @@ if __name__ == "__main__":
     parser.add_argument('--algo_name', type=str, default=None)
     parser.add_argument('--test_robustness', type=bool, default=False)
     parser.add_argument('--accuracy', type=bool, default=False)
-    parser.add_argument('--tsne', type=bool, default=True)
+    parser.add_argument('--tsne', type=bool, default=False)
     parser.add_argument('--flatness', type=bool, default=False)
-    parser.add_argument('--polar', type=bool, default=False)
+    parser.add_argument('--polar', type=bool, default=True)
     parser.add_argument('--segmentation', type=bool, default=False)
     parser.add_argument('--confusion_matrix', type=bool, default=False)
     parser.add_argument('--similarity', type=bool, default=False)
     parser.add_argument('--tsneOut_dir', type=str, default="./domainbed/tsneOuts/clip_train")
     args = parser.parse_args()
-    args.tsneOut_dir="./domainbed/tsneOuts/feat_tsne/"+args.dataset+"/"+args.algorithm
+    args.tsneOut_dir="./domainbed/tsneOuts/feat_polar_lable_d/"+args.dataset+"/"+args.algorithm
     heterogeneous_class=False
     if(args.pretrained==None):
         onlyfiles = [f for f in os.listdir(args.output_dir) if os.path.isfile(os.path.join(args.output_dir, f))]

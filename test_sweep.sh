@@ -3,24 +3,24 @@
 # for Wd in 0.05 0.2 0.5 1.5
 # do
 
-for dataset in VLCS PACS
+for dataset in VLCS PACS 
 do
-    python -m domainbed.scripts.test_sweep launch\
-        --data_dir=/share/data/drive_2/DG/data \
-        --output_dir=./domainbed/outputs_clip/Clip_train/${dataset}/lr-0.000005 \
-        --command_launcher gpu_0\
-        --algorithms Clip_train\
-        --single_test_envs \
-        --datasets ${dataset} \
-        --n_hparams 1  \
-        --n_trials 3 \
-        --skip_confirmation \
-        --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
+    # python -m domainbed.scripts.test_sweep launch\
+    #     --data_dir=/share/data/drive_2/DG/data \
+    #     --output_dir=./domainbed/outputs_clip/Clip_train/${dataset}/lr-0.000005 \
+    #     --command_launcher gpu_3\
+    #     --algorithms Clip_train\
+    #     --single_test_envs \
+    #     --datasets ${dataset} \
+    #     --n_hparams 1  \
+    #     --n_trials 3 \
+    #     --skip_confirmation \
+    #     --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
 
     python -m domainbed.scripts.test_sweep launch\
         --data_dir=/share/data/drive_2/DG/data \
         --output_dir=./domainbed/outputs_clip/Clip_train_mixup_with_text_ft_uniform/${dataset}/lr-0.000005 \
-        --command_launcher gpu_1\
+        --command_launcher gpu_0\
         --algorithms Clip_train_mixup_with_text\
         --single_test_envs \
         --datasets ${dataset} \

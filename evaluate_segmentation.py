@@ -6,6 +6,7 @@ import sys
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 import torchvision
 import torchvision.transforms as transforms
 from PIL import Image
@@ -15,6 +16,7 @@ from matplotlib.patches import Polygon
 from skimage.measure import find_contours
 from torch.nn.functional import interpolate
 import domainbed.lib.clip.clip as clip
+from domainbed.lib.clip.clip import tokenize
 from tqdm import tqdm
 import cv2 as cv
 import torch.nn as nn
@@ -94,7 +96,25 @@ def get_attention_masks(args, image, model,return_attn=False):
 
     # attentions=model.get_last_selfattention(image.cuda())
     image_features,attentions = model.visual(image.cuda(),return_attention=True)
-    text_features=model.text_features
+
+        
+    # text_inputs  = torch.cat([tokenize(f"a photo of a {c}") for c in misc.Class_names]).to("cuda")
+    # text_features = model.encode_text(text_inputs)
+    # image_features = image_features @ model.visual.proj
+
+    # image_features = image_features / image_features.norm(dim=1, keepdim=True)
+    # text_features = text_features / text_features.norm(dim=1, keepdim=True)
+
+
+    # # cosine similarity as logits
+    # logit_scale = model.logit_scale.exp()
+
+    # logits_per_image = logit_scale * image_features @ text_features.t()
+    # prob=F.softmax(logits_per_image).cpu().detach().numpy()
+    # np.savetxt(sys.stdout, prob)
+
+
+
     # print(text_features.shape)
     attentions=attentions[-1]
     nh = attentions.shape[1]
@@ -371,7 +391,7 @@ def generate_images_per_model(args, model, device,domain=""):
         for fol_name in tqdm(os.listdir(args.test_dir+"/"+d)):
             cnt=0
             for im_name in tqdm(os.listdir(args.test_dir+"/"+d+"/"+fol_name)):
-                if(cnt>15):
+                if(cnt>12):
                     break
                 cnt+=1
                 im_path = f"{args.test_dir}/{d}/{fol_name}/{im_name}"
@@ -547,6 +567,10 @@ if __name__ == '__main__':
     if opt.use_shape:
         assert opt.is_dist, "shape token only present in distilled models"
 
+    # misc.Class_names=["bird","bobcat","cat","coyote","dog","empty","oppossum","rabit","raccoon","squirrel"]
+    misc.Class_names=["bird","car","chair","dog","person"]
+
+
     if opt.pretrained_weights=="":
         print("Zero shot model")
         model, preprocess = clip.load('ViT-B/16', device)
@@ -563,8 +587,7 @@ if __name__ == '__main__':
         # # msg = model.load_state_dict(state_dict["model"], strict=False)
         # # print(msg)
     
-    # misc.Class_names=["bird","bobcat","cat","coyote","dog","empty","oppossum","rabit","raccoon","squirrel"]
-    misc.Class_names=["bird","car","chair","dog","person"]
+    
     
 
     if opt.generate_images:

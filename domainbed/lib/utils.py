@@ -67,7 +67,7 @@ def get_model(args, pretrained=True):
             model1["model_hparams"])
         algorithm.load_state_dict(model1["model_dict"],strict=False)
         try:
-            model = algorithm
+            model = algorithm.featurizer
         except:
             model = algorithm.network
         model.eval()

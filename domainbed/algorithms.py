@@ -3,6 +3,7 @@
 from unittest.mock import patch
 import torch
 import torch.nn as nn
+import time
 import torch.nn.functional as F
 import torch.autograd as autograd
 from torch.autograd import Variable
@@ -590,12 +591,15 @@ class ERM_ViT_with_text_mix(Algorithm):
                                   hparams)
 
         self.network=networks.ViT(input_shape, self.hparams,num_classes).network
+        self.n_outputs=384
+        
         self.network.head=nn.Identity()
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model, preprocess = clip.load('ViT-B/16', device)
         # model=model.float()
         self.featurizer=model.float()
-
+        if self.n_outputs!=768:
+            self.featurizer.visual.proj=nn.Parameter(0.03608439182435161 * torch.randn(self.n_outputs, 512))
         # self.network = nn.Sequential(self.featurizer, self.classifier)
         printNetworkParams(self.featurizer)
         self.optimizer = torch.optim.AdamW(
@@ -630,11 +634,11 @@ class ERM_ViT_with_text_mix(Algorithm):
         a=torch.rand(int(len(all_x)),self.num_domains)
         sum=torch.sum(a,dim=1,keepdims=True)
         a=(a*(1)/sum).to("cuda")
-        mixup_features=torch.unsqueeze(a[:,0],dim=1).expand(-1,768)*mixup_features
+        mixup_features=torch.unsqueeze(a[:,0],dim=1).expand(-1,self.n_outputs)*mixup_features
         mixup_text_feature=torch.unsqueeze(a[:,0],dim=1).expand(-1,512)*mixup_text_feature
         for d in range(1,self.num_domains):
             rand_perm=torch.randperm(bs)
-            mixup_features+=torch.unsqueeze(a[:,d],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[(dom+d)%self.num_domains][rand_perm] for dom in range(self.num_domains)]),dim=0)
+            mixup_features+=torch.unsqueeze(a[:,d],dim=1).expand(-1,self.n_outputs)*torch.cat(([mixup_features_chunk[(dom+d)%self.num_domains][rand_perm] for dom in range(self.num_domains)]),dim=0)
             mixup_text_feature+=torch.unsqueeze(a[:,d],dim=1).expand(-1,512)*torch.cat(([mixup_text_chunk[(dom+d)%self.num_domains][rand_perm] for dom in range(self.num_domains)]),dim=0)
         # image_features=torch.cat((image_features,mixup_features),dim=0)
         # all_y_full=torch.cat((all_y_full,all_y),dim=0)
@@ -1173,21 +1177,30 @@ class Clip_train_mixup_with_text(Algorithm):
             self.text_features = self.featurizer.encode_text(text_inputs)
         self.cnt=0
         self.num_domains=num_domains
+        self.tot_time=0
+        self.mix_time=0
         
 
     
     def update(self, minibatches, unlabeled=None):
+        # start_time=time.time()
         all_x = torch.cat([x for x,y in minibatches])
         all_y = torch.cat([y for x,y in minibatches])
         # print(all_y)
         image_features = self.featurizer.encode_image(all_x)
-        mixup_features=torch.clone(image_features)
+        text_features = self.text_features
+        image_features_n = image_features @ self.featurizer.visual.proj
+        image_features_n = image_features_n / image_features_n.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        logit_scale = self.featurizer.logit_scale.exp()
+        logits_per_image = logit_scale * image_features_n @ text_features.t()
+        loss_ce=F.cross_entropy(logits_per_image, all_y)
 
+        # mid1_time=time.time()
+        mixup_features=torch.clone(image_features)
         mixup_features_chunk=torch.chunk(mixup_features,chunks=self.num_domains)
-        
         mixup_text_feature=torch.index_select(self.text_features, 0, all_y)
         mixup_text_chunk=torch.chunk(mixup_text_feature,chunks=self.num_domains)
-
         bs=int(len(all_x)/self.num_domains)
         # ba=int(len(all_x))
         a=torch.rand(int(len(all_x)),self.num_domains)
@@ -1201,17 +1214,12 @@ class Clip_train_mixup_with_text(Algorithm):
             mixup_text_feature+=torch.unsqueeze(a[:,d],dim=1).expand(-1,512)*torch.cat(([mixup_text_chunk[(dom+d)%self.num_domains][rand_perm] for dom in range(self.num_domains)]),dim=0)
   
         
-        text_features = self.text_features
-        image_features = image_features @ self.featurizer.visual.proj
+        
         mixup_features=mixup_features @ self.featurizer.visual.proj
-        image_features = image_features / image_features.norm(dim=1, keepdim=True)
         mixup_features = mixup_features / mixup_features.norm(dim=1, keepdim=True)
-
-        text_features = text_features / text_features.norm(dim=1, keepdim=True)
         mixup_text_feature = mixup_text_feature / mixup_text_feature.norm(dim=1, keepdim=True)
-        logit_scale = self.featurizer.logit_scale.exp()
-
-        logits_per_image = logit_scale * image_features @ text_features.t()
+    
+        
         logits_per_image_mixup=logit_scale * mixup_features @ mixup_text_feature.t()
         logits_per_text_mixup = logits_per_image_mixup.t()
         
@@ -1220,14 +1228,25 @@ class Clip_train_mixup_with_text(Algorithm):
         loss_i = F.cross_entropy(logits_per_image_mixup, labels)
         loss_t = F.cross_entropy(logits_per_text_mixup, labels)
         loss = (loss_i + loss_t)/2.0
-    
-        loss+=F.cross_entropy(logits_per_image, all_y)
+        # mid2_time=time.time()
+
+        loss=loss_ce
 
 
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
         self.cnt+=1
+        # end_time=time.time()
+        
+        # tot_time=end_time-start_time
+        # mix_time=mid2_time-mid1_time
+        # self.tot_time+=tot_time
+        # self.mix_time+=mix_time
+        # if(self.cnt%100==0):
+        #     print("cnt:",self.cnt)
+        #     print("tot_time:",self.tot_time/self.cnt)
+        #     # print("mix_time:",self.mix_time/self.cnt)
         return {'loss': loss.item()}
 
 
