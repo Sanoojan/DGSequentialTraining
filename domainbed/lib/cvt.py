@@ -697,7 +697,7 @@ class ConvolutionalVisionTransformer(nn.Module):
             outputs = self.forward_features(x)
         if(ret_feat):
             return outputs[-1]
-        # x = [self.head(out) for out in outputs]
+        x = [self.head(out) for out in outputs]
         # print(x.shape(name=None))
         if self.di_token :
             return x[-1],self.head_DI(outputs_di[-1])

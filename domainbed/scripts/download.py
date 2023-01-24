@@ -240,7 +240,7 @@ def download_terra_incognita(data_dir):
                 src_path = os.path.join(images_folder, image_fname)
 
                 shutil.copyfile(src_path, dst_path)
-
+0
     shutil.rmtree(images_folder)
     os.remove(annotations_file)
 

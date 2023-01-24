@@ -31,6 +31,14 @@ from domainbed.lib.misc import (
 )
 
 
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
+from DOSNES import dosnes
+
+
+
+
 ALGORITHMS = [
     'ERM',
     'Fish',
@@ -724,7 +732,7 @@ class ERM_Vit_with_clip_mix(ERM_ViT_with_text_mix):
      
         for d in range(1,self.num_domains):
 
-            mixup_features+=torch.unsqueeze(a[:,d-1],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[(dom+d)%self.num_domains]for dom in range(self.num_domains)]),dim=0)
+            mixup_features+=torch.unsqueeze(a[:,d-1],dim=1).expand(-1,self.n_outputs)*torch.cat(([mixup_features_chunk[(dom+d)%self.num_domains]for dom in range(self.num_domains)]),dim=0)
            
         # image_features=torch.cat((image_features,mixup_features),dim=0)
         # all_y_full=torch.cat((all_y_full,all_y),dim=0)
@@ -1224,7 +1232,8 @@ class Clip_train_mixup_with_text(Algorithm):
         logits_per_text_mixup = logits_per_image_mixup.t()
         
         labels = torch.tensor(np.arange(len(all_x))).to("cuda")
-
+        if(self.cnt%100==0):
+            dosnesvis(logits_per_image_mixup,labels,self.cnt)
         loss_i = F.cross_entropy(logits_per_image_mixup, labels)
         loss_t = F.cross_entropy(logits_per_text_mixup, labels)
         loss = (loss_i + loss_t)/2.0
@@ -2037,8 +2046,8 @@ class DPLCLIP(CLIP):
         image_features = image_features / image_features.norm(dim=-1, keepdim=True)
         text_features = text_features / text_features.norm(dim=-1, keepdim=True)
         logits_per_image = self.clip_model.logit_scale.exp() * image_features @ text_features.t()
-        # print(logits_per_image.shape)
-        # print(all_y)
+        print(logits_per_image.shape)
+        print(all_y)
         loss = F.cross_entropy(logits_per_image, all_y)
             
         self.optimizer.zero_grad()
@@ -4241,3 +4250,63 @@ class Identity(torch.nn.Module):
 
     def forward(self, x):
         return x
+
+
+def plot_features( labels, num_classes,filename,X_embedded=None):
+    """Plot features on 2D plane.
+    Args:
+        features: (num_instances, num_features).
+        labels: (num_instances).
+    """
+
+    colors = ['C0', 'C1', 'C2', 'C3', 'C8', 'C5', 'C6','C7','C9','C4']
+ 
+    all_colors=[]
+    for lab in labels:
+        all_colors.append(colors[lab])
+
+
+    fig = plt.figure()
+    ax = fig.add_subplot(projection='3d')
+
+    ax.scatter(X_embedded[:, 0], X_embedded[:, 1], X_embedded[:, 2], c=all_colors)
+    plt.savefig(filename, bbox_inches='tight',dpi=1200)
+    plt.close()
+
+
+def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
+              filename: str,tsneOut_dir:str,domain_labels=['location_38','location_43','location_46','location_100'],dos=True):
+    
+
+    labels=np.array(labels)
+    features=np.array(features)
+
+    metric = "sqeuclidean"
+    dosmodel = dosnes.DOSNES(metric = metric, verbose = 1, random_state=42,max_iter=850)
+    X_embedded = dosmodel.fit_transform(features)
+    
+    # X_tsne = TSNE(n_components=2, random_state=33,init='pca').fit_transform(features)
+    
+    # domain labels, 1 represents source while 0 represents target
+    
+
+    # visualize using matplotlib
+    fig, ax = plt.subplots(figsize=(10, 10))
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+ 
+    labelscls=labels%10
+    plot_features( labelscls, len(misc.Class_names),os.path.join(tsneOut_dir,"01clswise"+filename),X_embedded=X_embedded)
+
+
+def dosnesvis(features,labels,epoch):
+    save_dir="tsneOut/traintime/mixup_with_text/"
+    features=features.detach().cpu().numpy()
+    labels=labels.detach().cpu().numpy()
+    visualizeEd(features,labels,epoch,tsneOut_dir=save_dir,filename=str(epoch)+".png")
+   
+
+    # plt.savefig('tsne'+str(epoch)+'.png')
+    # plt.close()

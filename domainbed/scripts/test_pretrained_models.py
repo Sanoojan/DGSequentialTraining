@@ -1,7 +1,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 #ResNet-18 True , data aug: True, normailization on
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = '2'
+# os.environ["CUDA_VISIBLE_DEVICES"] = '2'
 import argparse
 import collections
 import json
@@ -30,6 +30,11 @@ from domainbed.lib import misc
 from domainbed.lib.fast_data_loader import InfiniteDataLoader, FastDataLoader
 
 
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
+from DOSNES import dosnes
+
 
 def load_model(fname):
     
@@ -44,111 +49,8 @@ def load_model(fname):
     algorithm.load_state_dict(dump["model_dict"],strict=False)
     return algorithm
 
-def polar_features():
-    def circular_hist(ax, x, bins=32, density=True, offset=0, gaps=True):
-        """
-        Produce a circular histogram of angles on ax.
 
-        Parameters
-        ----------
-        ax : matplotlib.axes._subplots.PolarAxesSubplot
-            axis instance created with subplot_kw=dict(projection='polar').
-
-        x : array
-            Angles to plot, expected in units of radians.
-
-        bins : int, optional
-            Defines the number of equal-width bins in the range. The default is 16.
-
-        density : bool, optional
-            If True plot frequency proportional to area. If False plot frequency
-            proportional to radius. The default is True.
-
-        offset : float, optional
-            Sets the offset for the location of the 0 direction in units of
-            radians. The default is 0.
-
-        gaps : bool, optional
-            Whether to allow gaps between bins. When gaps = False the bins are
-            forced to partition the entire [-pi, pi] range. The default is True.
-
-        Returns
-        -------
-        n : array or list of arrays
-            The number of values in each bin.
-
-        bins : array
-            The edges of the bins.
-
-        patches : `.BarContainer` or list of a single `.Polygon`
-            Container of individual artists used to create the histogram
-            or list of such containers if there are multiple input datasets.
-        """
-        # Wrap angles to [-pi, pi)
-        x = (x+np.pi) % (2*np.pi) - np.pi
-
-        # Force bins to partition entire circle
-        if not gaps:
-            bins = np.linspace(-np.pi, np.pi, num=bins+1)
-
-        # Bin data and record counts
-        n, bins = np.histogram(x, bins=bins)
-
-        # Compute width of each bin
-        widths = np.diff(bins)
-
-        # By default plot frequency proportional to area
-        if density:
-            # Area to assign each bin
-            area = n / x.size
-            # Calculate corresponding bin radius
-            radius = (area/np.pi) ** .5
-        # Otherwise plot frequency proportional to radius
-        else:
-            radius = n
-
-        # Plot data on ax
-        patches = ax.bar(bins[:-1], radius, zorder=1, align='edge', width=widths,
-                        edgecolor='C0', fill=True, linewidth=1)
-
-        # Set the direction of the zero angle
-        ax.set_theta_offset(offset)
-
-        # Remove ylabels for area plots (they are mostly obstructive)
-        if density:
-            ax.set_yticks([])
-
-        return n, bins, patches
-
-    angles0 = np.random.normal(loc=0, scale=1, size=(1000,2))
-    angles1 = np.random.uniform(0, 2*np.pi, size=1000)
-
-    # Construct figure and axis to plot on
-    fig, ax = plt.subplots(1, 2, subplot_kw=dict(projection='polar'))
-
-    # Visualise by area of bins
-    circular_hist(ax[0], angles0)
-
-    N = 80
-    bottom = 8
-    max_height = 4
-
-    theta = np.linspace(0.0, 2 * np.pi, N, endpoint=False)
-    radii = max_height*np.random.rand(N)
-    width = (2*np.pi) / N
-
-    ax = plt.subplot(111, polar=True)
-    bars = ax.bar(theta, radii, width=width, bottom=bottom)
-
-    # Use custom colors and opacity
-    for r, bar in zip(radii, bars):
-        bar.set_facecolor(plt.cm.jet(r / 10.))
-        bar.set_alpha(0.8)
-
-    plt.show()
-
-
-def plot_features(features, labels, num_classes,filename):
+def plot_features(features, labels, num_classes,filename,X_embedded=None):
     """Plot features on 2D plane.
     Args:
         features: (num_instances, num_features).
@@ -161,32 +63,36 @@ def plot_features(features, labels, num_classes,filename):
         colors=[ 'C0', 'C1', 'C3','C8']
         class_names=['Art','Cartoon','Photo','Sketch']
     unique_classes=np.unique(np.array(labels))
+    
 
     # class_names=[name for class in class_names[]]
     class_names_sel=[]
+    all_colors=[]
+    for lab in labels:
+        all_colors.append(colors[lab])
     for label_idx in unique_classes:
-        if(label_idx==num_classes):
+        # if(label_idx==num_classes):
 
-            plt.scatter(
-                features[labels==label_idx, 0],
-                features[labels==label_idx, 1],
-                c='C3',
-                s=50,
-            )
-            plt.xticks([])
-            plt.yticks([])
-        else:
-            class_names_sel.append(class_names[label_idx])
-            plt.scatter(
-                features[labels==label_idx, 0],
-                features[labels==label_idx, 1],
-                c=colors[label_idx],
-                s=10,
-            )
-            plt.xticks([])
-            plt.yticks([])
-    # plt.legend(class_names_sel, loc='upper right', bbox_to_anchor=(1.2,1), labelspacing=1.2)
-    plt.legend(class_names_sel, loc='lower left',fontsize="small",handletextpad=0.1,markerscale=2.0,mode = "expand", columnspacing=5.0,ncol = num_classes)
+        #     plt.scatter(
+        #         features[labels==label_idx, 0],
+        #         features[labels==label_idx, 1],
+        #         c='C3',
+        #         s=50,
+        #     )
+        #     plt.xticks([])
+        #     plt.yticks([])
+        # else:
+        class_names_sel.append(class_names[label_idx])
+        plt.scatter(
+            features[labels==label_idx, 0],
+            features[labels==label_idx, 1],
+            c=colors[label_idx],
+            s=10,
+        )
+        plt.xticks([])
+        plt.yticks([])
+    plt.legend(class_names_sel, loc='upper right', bbox_to_anchor=(1.2,1), labelspacing=1.2)
+    # plt.legend(class_names_sel, loc='lower left',fontsize="small",handletextpad=0.1,markerscale=2.0,mode = "expand", columnspacing=5.0,ncol = num_classes)
     #dirname = osp.join(args.save_dir, prefix)
     # if not osp.exists(dirname):
     #     os.mkdir(dirname)
@@ -195,12 +101,33 @@ def plot_features(features, labels, num_classes,filename):
 
     plt.close()
 
+    # X, y = datasets.load_digits(return_X_y = True)
+    metric = "sqeuclidean"
+
+    # model = dosnes.DOSNES(metric = metric, verbose = 1, random_state=42)
+    # X_embedded = model.fit_transform(X)
+
+    fig = plt.figure()
+    ax = fig.add_subplot(projection='3d')
+    print(X_embedded.shape)
+    print(unique_classes)
+    ax.scatter(X_embedded[:, 0], X_embedded[:, 1], X_embedded[:, 2], c=all_colors, cmap=plt.cm.Set1)
+    plt.title("Features Embedded on a Sphere with metric {}".format(metric))
+    plt.savefig(filename, bbox_inches='tight',dpi=1200)
+    plt.close()
+
+
 def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
-              filename: str,tsneOut_dir:str,domain_labels=['location_38','location_43','location_46','location_100']):
+              filename: str,tsneOut_dir:str,domain_labels=['location_38','location_43','location_46','location_100'],dos=True):
     
 
     labels=np.array(labels)
     features=np.array(features)
+
+    metric = "sqeuclidean"
+    dosmodel = dosnes.DOSNES(metric = metric, verbose = 1, random_state=42,max_iter=850)
+    X_embedded = dosmodel.fit_transform(features)
+    
     X_tsne = TSNE(n_components=2, random_state=33,init='pca').fit_transform(features)
     # X_PCA=PCA(n_components=2).fit_transform(features)
     # domain labels, 1 represents source while 0 represents target
@@ -214,23 +141,24 @@ def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
     ax.spines['left'].set_visible(False)
  
     labelscls=labels%10
-    labelscls[-len(misc.Class_names):]=len(misc.Class_names) #just class_id as last
-    plot_features(X_tsne, labelscls, len(misc.Class_names),os.path.join(tsneOut_dir,"01clswise"+filename))
+    plot_features(X_tsne, labelscls, len(misc.Class_names),os.path.join(tsneOut_dir,"01clswise"+filename),X_embedded=X_embedded)
 
-    fig, ax = plt.subplots(figsize=(10, 10))
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['bottom'].set_visible(False)
-    ax.spines['left'].set_visible(False)
-    labelsd=labels//10
-    labelsdom=labels*0
-    labelsdom[labelsd==int(args.test_envs[0])]=1
+    # fig, ax = plt.subplots(figsize=(10, 10))
+    # ax.spines['top'].set_visible(False)
+    # ax.spines['right'].set_visible(False)
+    # ax.spines['bottom'].set_visible(False)
+    # ax.spines['left'].set_visible(False)
+    # labelsd=labels//10
+    # labelsdom=labels*0
+    # labelsdom[labelsd==int(args.test_envs[0])]=1
     # named_labels=[]
     # for lab in (labelsd):
     #     named_labels.append(domain_labels[int(lab)])
 
-    plot_features(X_tsne[:-len(misc.Class_names)], labelsd[:-len(misc.Class_names)], 3,os.path.join(tsneOut_dir,"01domwise"+filename))
+    # plot_features(X_tsne[:-len(misc.Class_names)], labelsd[:-len(misc.Class_names)], 3,os.path.join(tsneOut_dir,"01domwise"+filename))
 
+
+    
 
 
 if __name__ == "__main__":
@@ -259,15 +187,16 @@ if __name__ == "__main__":
     parser.add_argument('--algo_name', type=str, default=None)
     parser.add_argument('--test_robustness', type=bool, default=False)
     parser.add_argument('--accuracy', type=bool, default=False)
-    parser.add_argument('--tsne', type=bool, default=False)
+    parser.add_argument('--tsne', type=bool, default=True)
+    parser.add_argument('--dosnes', type=bool, default=True)
     parser.add_argument('--flatness', type=bool, default=False)
-    parser.add_argument('--polar', type=bool, default=True)
+    parser.add_argument('--polar', type=bool, default=False)
     parser.add_argument('--segmentation', type=bool, default=False)
     parser.add_argument('--confusion_matrix', type=bool, default=False)
     parser.add_argument('--similarity', type=bool, default=False)
     parser.add_argument('--tsneOut_dir', type=str, default="./domainbed/tsneOuts/clip_train")
     args = parser.parse_args()
-    args.tsneOut_dir="./domainbed/tsneOuts/feat_polar_lable_d/"+args.dataset+"/"+args.algorithm
+    args.tsneOut_dir="./domainbed/tsneOuts/feat_tsne_mix/"+args.dataset+"/"+args.algorithm
     heterogeneous_class=False
     if(args.pretrained==None):
         onlyfiles = [f for f in os.listdir(args.output_dir) if os.path.isfile(os.path.join(args.output_dir, f))]
@@ -561,8 +490,8 @@ if __name__ == "__main__":
             #     continue
             # if(int(name[3]) in args.test_envs  and  "out" in name ):
             #     continue
-            # if(int(name[3]) in args.test_envs ):
-            #     continue
+            if(int(name[3]) in args.test_envs ):
+                continue
             # if(int(name[3]) not in args.test_envs ):
             #     continue
             print(name)
@@ -570,21 +499,21 @@ if __name__ == "__main__":
             
             with open("tsne/TSVS/records_"+name_conv+"_blk_"+".tsv", "a") as record_file:
                 for i in range(len(labels)):
-                   
-                    Features_all.append(Features[i])
-                    for j in range(len(Features[i])):
-                        
-                        record_file.write(str(Features[i][j]))
-                        record_file.write("\t")
-                    record_file.write("\n")
+                    if(labels[i]<3):
+                        Features_all.append(Features[i])
+                        for j in range(len(Features[i])):
+                            
+                            record_file.write(str(Features[i][j]))
+                            record_file.write("\t")
+                        record_file.write("\n")
          
             with open("tsne/TSVS/meta_"+name_conv+".tsv", "a") as record_file:
                 for i in range(len(labels)):
-                
-                    labels_all.append(int(str(env_name[-1])+str(labels[i])))
-                    tokenlabels.append("DS") if i<len(labels)/2 else tokenlabels.append("DI")
-                    record_file.write(str(labels[i]))
-                    record_file.write("\n")
+                    if(labels[i]<3):
+                        labels_all.append(int(str(env_name[-1])+str(labels[i])))
+                        tokenlabels.append("DS") if i<len(labels)/2 else tokenlabels.append("DI")
+                        record_file.write(str(labels[i]))
+                        record_file.write("\n")
         elif(args.flatness  and  "in" in name):
             # Computing Flatness (comment gaussian noise with std for random normal scaling)
             
@@ -664,17 +593,29 @@ if __name__ == "__main__":
                     record_file.write("ac"+str(args.test_envs[0])+"+=")
                 record_file.write("np.array("+str(accuracies)+")")
                 record_file.write("\n")
+
         elif (int(name[3]) in args.test_envs and  "in" in name):
             print("name",name)
-            env_name=name[:4]
-
+            
             if(args.confusion_matrix):
-                conf=misc.confusionMatrix(algorithm, loader, weights, device,args.output_dir,env_name,algo_name)
-            elif(args.test_robustness):
-                acc=misc.accuracy(algorithm, loader, weights, device,addnoise=True)
-                print(algo_name,"_with_noise:",env_name[3],":",acc)
+                                        # (network, loader, weights, device, output_dir, env_name, algo_name,args,algorithm_class,dataset,hparams)
+                conf=misc.confusionMatrix(algorithm, loader, weights, device,args.output_dir,env_name,algo_name,args,algorithm_class,dataset,hparams)
+
+               
             else:
+                #plot blockwise accuracies for transformer
                 block_acc=misc.plot_block_accuracy2(algorithm, loader, weights, device,args.output_dir,env_name,algo_name)
+        # elif (int(name[3]) in args.test_envs and  "in" in name):
+        #     print("name",name)
+        #     env_name=name[:4]
+
+        #     if(args.confusion_matrix):
+        #         conf=misc.confusionMatrix(algorithm, loader, weights, device,args.output_dir,env_name,algo_name)
+        #     elif(args.test_robustness):
+        #         acc=misc.accuracy(algorithm, loader, weights, device,addnoise=True)
+        #         print(algo_name,"_with_noise:",env_name[3],":",acc)
+        #     else:
+        #         block_acc=misc.plot_block_accuracy2(algorithm, loader, weights, device,args.output_dir,env_name,algo_name)
             
             
     results_keys = sorted(results.keys())
@@ -704,16 +645,16 @@ if __name__ == "__main__":
             text_features = text_features / text_features.norm(dim=1, keepdim=True)
             logit_scale = algorithm.featurizer.logit_scale.exp()
             angles =(text_features @ text_features.t()).cpu().detach().numpy()
-            print(angles)
+            # print(angles)
             for i in range(dataset.num_classes):
                 Features_all.append(angles[i])
-                labels_all.append(100)
+                labels_all.append(3)
         else:
             text_features = algorithm.text_features
             text_features = (text_features / text_features.norm(dim=1, keepdim=True)).cpu().detach().numpy()
             for i in range(dataset.num_classes):
                 Features_all.append(text_features[i])
-                labels_all.append(100)
+                labels_all.append(3)
         # print(labels_all) 
         # print(Features_all)
             

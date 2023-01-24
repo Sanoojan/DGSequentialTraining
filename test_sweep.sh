@@ -3,12 +3,13 @@
 # for Wd in 0.05 0.2 0.5 1.5
 # do
 
-for dataset in VLCS PACS 
+# TerraIncognita VLCS
+for dataset in PACS
 do
     # python -m domainbed.scripts.test_sweep launch\
     #     --data_dir=/share/data/drive_2/DG/data \
     #     --output_dir=./domainbed/outputs_clip/Clip_train/${dataset}/lr-0.000005 \
-    #     --command_launcher gpu_3\
+    #     --command_launcher multi_gpu\
     #     --algorithms Clip_train\
     #     --single_test_envs \
     #     --datasets ${dataset} \
@@ -17,30 +18,74 @@ do
     #     --skip_confirmation \
     #     --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
 
-    python -m domainbed.scripts.test_sweep launch\
-        --data_dir=/share/data/drive_2/DG/data \
-        --output_dir=./domainbed/outputs_clip/Clip_train_mixup_with_text_ft_uniform/${dataset}/lr-0.000005 \
-        --command_launcher gpu_0\
-        --algorithms Clip_train_mixup_with_text\
-        --single_test_envs \
-        --datasets ${dataset} \
-        --n_hparams 1  \
-        --n_trials 3 \
-        --skip_confirmation \
-        --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
+    # CUDA_VISIBLE_DEVICES=0,1,2,3 python -m domainbed.scripts.test_sweep launch\
+    #     --data_dir=/share/data/drive_2/DG/data \
+    #     --output_dir=./domainbed/outputs_clip/Clip_train_mixup_with_text_ft_uniform/${dataset}/lr-0.000005 \
+    #     --command_launcher multi_gpu\
+    #     --algorithms Clip_train_mixup_with_text\
+    #     --single_test_envs \
+    #     --datasets ${dataset} \
+    #     --n_hparams 1  \
+    #     --n_trials 3 \
+    #     --skip_confirmation \
+    #     --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
 
-    python -m domainbed.scripts.test_sweep launch\
+    CUDA_VISIBLE_DEVICES=2,4,5 python -m domainbed.scripts.test_sweep launch\
         --data_dir=/share/data/drive_2/DG/data \
         --output_dir=./domainbed/outputs_clip/Clip_zero_shot/${dataset}\
-        --command_launcher gpu_0\
+        --command_launcher multi_gpu\
         --algorithms clip_zero_shot \
         --single_test_envs \
         --datasets ${dataset} \
         --n_hparams 1  \
-        --n_trials 3 \
+        --n_trials 1 \
         --skip_confirmation \
         --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\"}"""\ 
 done
+
+
+
+# for dataset in VLCS TerraIncognita PACS 
+# do
+#     python -m domainbed.scripts.test_sweep launch\
+#         --data_dir=/share/data/drive_2/DG/data \
+#         --output_dir=./domainbed/outputs_clip/Clip_train/${dataset}/lr-0.000005 \
+#         --command_launcher gpu_3\
+#         --algorithms Clip_train\
+#         --single_test_envs \
+#         --datasets ${dataset} \
+#         --n_hparams 1  \
+#         --n_trials 3 \
+#         --skip_confirmation \
+#         --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
+
+#     python -m domainbed.scripts.test_sweep launch\
+#         --data_dir=/share/data/drive_2/DG/data \
+#         --output_dir=./domainbed/outputs_clip/Clip_train_mixup_with_text_ft_uniform/${dataset}/lr-0.000005 \
+#         --command_launcher gpu_0\
+#         --algorithms Clip_train_mixup_with_text\
+#         --single_test_envs \
+#         --datasets ${dataset} \
+#         --n_hparams 1  \
+#         --n_trials 3 \
+#         --skip_confirmation \
+#         --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
+
+#     python -m domainbed.scripts.test_sweep launch\
+#         --data_dir=/share/data/drive_2/DG/data \
+#         --output_dir=./domainbed/outputs_clip/Clip_zero_shot/${dataset}\
+#         --command_launcher gpu_0\
+#         --algorithms clip_zero_shot \
+#         --single_test_envs \
+#         --datasets ${dataset} \
+#         --n_hparams 1  \
+#         --n_trials 3 \
+#         --skip_confirmation \
+#         --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\"}"""\ 
+# done
+
+
+
 # python -m domainbed.scripts.test_sweep launch\
 #     --data_dir=/share/data/drive_2/DG/data \
 #     --output_dir=./domainbed/outputs_clip/Clip_train_text_freeze/VLCS/lr-0.000005 \
@@ -153,3 +198,51 @@ done
 
 # --hparams """{\"batch_size\":32,\"attn_sep_mask\":0,\"mask_clsT_distT\":0,\"mask_dist_other_patches\":0}"""
 # ,\"mask_clsT_distT\":0,\"mask_dist_other_patches\":1
+
+# for dataset in PACS 
+# do
+#     for pretr in Clip_train_mixup_with_text
+#     do
+#         for tr_dom in 0 1 2 3
+#         do 
+#             for trial in 0 
+#             do
+#                 CUDA_VISIBLE_DEVICES=0 python -m domainbed.scripts.test_pretrained_models \
+#                 --algorithm Clip_train_mixup_with_text \
+#                 --pretrained "/share/users/sanoojan/DGST/domainbed/outputs_clip/Evaluation/${dataset}-ours/lr-0.000005/test_env${tr_dom}_${trial}/best_val_model_testdom_[${tr_dom}].pkl"\
+#                 --data_dir "/share/data/drive_2/DG/data"\
+#                 --dataset ${dataset} \
+#                 --output_dir "./confusion_matrix/${pretr}/${tr_dom}/" \
+#                 --seed 0 \
+#                 --task domain_generalization\
+#                 --test_envs $tr_dom \
+#                 --trial_seed "$trial" \
+#                 --algo_name "$pretr" \
+#                 --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""
+#             done
+#         done
+#     done
+
+#     for pretr in Clip_train
+#     do
+#         for tr_dom in 0 1 2 3
+#         do 
+#             for trial in 0 
+#             do
+#                 CUDA_VISIBLE_DEVICES=0 python -m domainbed.scripts.test_pretrained_models \
+#                 --algorithm Clip_train \
+#                 --pretrained "/share/users/sanoojan/DGST/domainbed/outputs_clip/Evaluation/${dataset}-clip-train/lr-0.000005/test_env${tr_dom}_${trial}/best_val_model_testdom_[${tr_dom}].pkl"\
+#                 --data_dir "/share/data/drive_2/DG/data"\
+#                 --dataset ${dataset} \
+#                 --output_dir "./confusion_matrix/${pretr}/${tr_dom}/" \
+#                 --seed 0 \
+#                 --task domain_generalization\
+#                 --test_envs $tr_dom \
+#                 --trial_seed "$trial" \
+#                 --algo_name "$pretr" \
+#                 --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""
+#             done
+#         done
+#     done
+
+# done

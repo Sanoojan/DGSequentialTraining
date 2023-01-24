@@ -13,11 +13,16 @@ from collections import OrderedDict, defaultdict
 from numbers import Number
 import operator
 import matplotlib.pyplot as plt
+from sklearn.preprocessing import MultiLabelBinarizer
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import plot_confusion_matrix
+import seaborn as sn
 import numpy as np
 import torch
 import tqdm
 import torch.nn.functional as F
 from collections import Counter
+# from domainbed import algorithms
 
 Class_names=[]
 Train_class_names=[]
@@ -433,7 +438,7 @@ def loss_ret(network, loader, weights, device,noise_sd=0.5,addnoise=False):
     return total_loss/(counter*1.0),correct / total
 
 def confusionMatrix(network, loader, weights, device, output_dir, env_name, algo_name,args,algorithm_class,dataset,hparams):
-    trials=3
+    trials=1
     
     
     if algo_name is None:
@@ -441,11 +446,13 @@ def confusionMatrix(network, loader, weights, device, output_dir, env_name, algo
     conf_mat_all=[]
     
     for i in range(trials):
-        pretrained_path=args.pretrained
-        pretrained_path=pretrained_path[:-14]+str(i)+pretrained_path[-13:]
-        network = algorithm_class(dataset.input_shape, dataset.num_classes,
-            len(dataset) - len(args.test_envs), hparams,pretrained_path) #args.pretrained
-        network.to(device)
+        # pretrained_path=args.pretrained
+
+        # pretrained_path=pretrained_path[:-32]+str(i)+pretrained_path[-31:]
+        # # network = algorithm_class(dataset.input_shape, dataset.num_classes,
+        # #     len(dataset) - len(args.test_envs), hparams,pretrained_path) #args.pretrained
+        # network = load_model(pretrained_path,algorithm_class)#args.pretrained
+        # network.to(device)
         correct = 0
         total = 0
         weights_offset = 0
@@ -481,15 +488,16 @@ def confusionMatrix(network, loader, weights, device, output_dir, env_name, algo
         # print(confusion_matrix(y_true, y_pred))
         conf_mat_all.append(conf_mat)
         print(conf_mat, 'cf_matrix')
-    conf_mat=(conf_mat_all[0]+conf_mat_all[1]+conf_mat_all[2])/(trials*1.0)
+    conf_mat=(conf_mat_all[0])/(trials*1.0)
     conf_mat=conf_mat.astype('int')
     print(conf_mat, 'cf_matrix_average')
     conf_mat=conf_mat/np.sum(conf_mat,axis=1,keepdims=True) #percentage calculator
 
-    sn.set(font_scale=20)  # for label size
+    sn.set(font_scale=30)  # for label size
     plt.figure(figsize=(150, 150))
+    classes_list=[str(i) for i in range(dataset.num_classes)]
     # sn.heatmap(conf_mat, cbar=False,square=True, annot=True,annot_kws={"size": 90},fmt='d',xticklabels=['DG','EP','GF','GT','HR','HS','PR'],yticklabels=['DG','EP','GF','GT','HR','HS','PR'])  # font size
-    ax=sn.heatmap(conf_mat, cmap="Greens", cbar=True,linewidths=4, square=True, annot=True,fmt='.1%',annot_kws={"size": 155},xticklabels=['0','1','2','3','4','5','6','7','8','9'],yticklabels=['0','1','2','3','4','5','6','7','8','9'])  # font size
+    ax=sn.heatmap(conf_mat, cmap="Blues", cbar=False,linewidths=4, square=True, annot=True,fmt='.1%',annot_kws={"size": 300},xticklabels=classes_list,yticklabels=classes_list)  # font size
     # ax=sn.heatmap(conf_mat, cbar=True, cmap="Blues",annot=True,fmt='.1%',annot_kws={"size": 90},linewidths=4, square = True, xticklabels=['0','1','2','3','4','5','6'],yticklabels=['0','1','2','3','4','5','6'])  # font size
     # ax=sn.heatmap(conf_mat, cbar=True, cmap="Blues",annot=True,fmt='.1%',annot_kws={"size": 90},linewidths=4, square = True, xticklabels=['0','1','2','3','4','5','6'],yticklabels=['0','1','2','3','4','5','6'])  # font size
     plt.yticks(rotation=0)
@@ -501,7 +509,7 @@ def confusionMatrix(network, loader, weights, device, output_dir, env_name, algo
     ax.axvline(x=0, color='k',linewidth=10)
     ax.axvline(x=conf_mat.shape[1], color='k',linewidth=10)
     # plt.show()
-    plt.savefig('Confusion_matrices/'+algo_name+env_name+'.png',bbox_inches='tight')
+    plt.savefig('Confusion_matrices/'+algo_name+env_name+args.dataset+'.png',bbox_inches='tight')
 
 
     
@@ -592,3 +600,17 @@ class ParamDict(OrderedDict):
 
     def __truediv__(self, other):
         return self._prototype(other, operator.truediv)
+
+
+def load_model(fname,algorithm_class):
+    
+    dump = torch.load(fname)
+    # algorithm_class = algorithms.get_algorithm_class(dump["args"]["algorithm"])
+    algorithm = algorithm_class(
+        dump["model_input_shape"],
+        dump["model_num_classes"],
+        dump["model_num_domains"],
+        dump["model_hparams"])
+    
+    algorithm.load_state_dict(dump["model_dict"],strict=False)
+    return algorithm
