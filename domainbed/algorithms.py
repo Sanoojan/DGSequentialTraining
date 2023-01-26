@@ -107,8 +107,8 @@ class ERM(Algorithm):
     def __init__(self, input_shape, num_classes, num_domains, hparams):
         super(ERM, self).__init__(input_shape, num_classes, num_domains,
                                   hparams)
-        # self.featurizer = networks.Featurizer(input_shape, self.hparams)
-        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network.visual
+        self.featurizer = networks.Featurizer(input_shape, self.hparams)
+        # self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network.visual
         self.classifier = networks.Classifier(
             1024,
             num_classes,
@@ -1232,7 +1232,7 @@ class Clip_train_mixup_with_text(Algorithm):
         logits_per_text_mixup = logits_per_image_mixup.t()
         
         labels = torch.tensor(np.arange(len(all_x))).to("cuda")
-        if(self.cnt%100==0):
+        if(self.cnt%400==0):
             dosnesvis(logits_per_image_mixup,labels,self.cnt)
         loss_i = F.cross_entropy(logits_per_image_mixup, labels)
         loss_t = F.cross_entropy(logits_per_text_mixup, labels)
@@ -4282,7 +4282,7 @@ def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
     features=np.array(features)
 
     metric = "sqeuclidean"
-    dosmodel = dosnes.DOSNES(metric = metric, verbose = 1, random_state=42,max_iter=850)
+    dosmodel = dosnes.DOSNES(metric = metric, verbose = 1, random_state=42,max_iter=1500)
     X_embedded = dosmodel.fit_transform(features)
     
     # X_tsne = TSNE(n_components=2, random_state=33,init='pca').fit_transform(features)
@@ -4302,7 +4302,7 @@ def visualizeEd(features: torch.Tensor, labels: torch.Tensor,tokenlabels,
 
 
 def dosnesvis(features,labels,epoch):
-    save_dir="tsneOut/traintime/mixup_with_text/"
+    save_dir="domainbed/tsneOuts/traintime/mixup_with_text/"
     features=features.detach().cpu().numpy()
     labels=labels.detach().cpu().numpy()
     visualizeEd(features,labels,epoch,tsneOut_dir=save_dir,filename=str(epoch)+".png")

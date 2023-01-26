@@ -81,6 +81,14 @@ class ResNet(torch.nn.Module):
             else:
                 self.network = torchvision.models.resnet50(pretrained=True)
                 self.n_outputs = 2048
+        elif hparams['weight_init']=="MoCoV2":
+            if hparams['backbone']=="Resnet18":
+                self.network = torchvision.models.resnet18()
+                self.n_outputs = 512
+            else:
+                path="domainbed/pretrained/Resnet50/mocov2_resnet50_8xb32-coslr-200e_in1k_20220225-89e03af4.pth"
+                self.network = load_resnet_from_path(path, num_classes=7)
+                self.n_outputs = 2048
         elif hparams['weight_init']=="kaiming_normal":
             if hparams['backbone']=="Resnet18":
                 self.network = torchvision.models.resnet18()
@@ -525,4 +533,19 @@ def load_dino(model_name,num_classes=0,distilled=False,num_dist_token=0):
     state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
     msg = model.load_state_dict(state_dict, strict=False)
     print('Pretrained weights found at {} and loaded with msg: {}'.format(pretrained_weights, msg))
+    return model
+
+def load_resnet_from_path(path, num_classes=0):
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    model = torchvision.models.resnet50(pretrained=True)
+    # for p in model.parameters():
+    #     p.requires_grad = False
+    # model.eval()
+    model.to(device)
+    state_dict = torch.load(path, map_location="cpu")
+    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+    # remove `backbone.` prefix induced by multicrop wrapper
+    state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
+    msg = model.load_state_dict(state_dict, strict=False)
+    print('Pretrained weights found at {} and loaded with msg: {}'.format(path, msg))
     return model
