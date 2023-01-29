@@ -31,10 +31,10 @@ from domainbed.lib.misc import (
 )
 
 
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
+# import matplotlib.pyplot as plt
+# from mpl_toolkits.mplot3d import Axes3D
 
-from DOSNES import dosnes
+# from DOSNES import dosnes
 
 
 
@@ -110,9 +110,9 @@ class ERM(Algorithm):
         self.featurizer = networks.Featurizer(input_shape, self.hparams)
         # self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network.visual
         self.classifier = networks.Classifier(
-            1024,
+            self.featurizer.n_outputs,
             num_classes,
-            self.hparams['nonlinear_classifier'],init=self.hparams['weight_init'])
+            self.hparams['nonlinear_classifier'])
 
         self.network = nn.Sequential(self.featurizer, self.classifier)
         # print(self.network)
@@ -1187,6 +1187,7 @@ class Clip_train_mixup_with_text(Algorithm):
         self.num_domains=num_domains
         self.tot_time=0
         self.mix_time=0
+        self.num_mixups=self.hparams['num_mixups']
         
 
     
@@ -1210,17 +1211,23 @@ class Clip_train_mixup_with_text(Algorithm):
         mixup_text_feature=torch.index_select(self.text_features, 0, all_y)
         mixup_text_chunk=torch.chunk(mixup_text_feature,chunks=self.num_domains)
         bs=int(len(all_x)/self.num_domains)
-        # ba=int(len(all_x))
-        a=torch.rand(int(len(all_x)),self.num_domains)
-        sum=torch.sum(a,dim=1,keepdims=True)
-        a=(a*(1)/sum).to("cuda")
-        mixup_features=torch.unsqueeze(a[:,0],dim=1).expand(-1,768)*mixup_features
-        mixup_text_feature=torch.unsqueeze(a[:,0],dim=1).expand(-1,512)*mixup_text_feature
-        for d in range(1,self.num_domains):
-            rand_perm=torch.randperm(bs)
-            mixup_features+=torch.unsqueeze(a[:,d],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[(dom+d)%self.num_domains][rand_perm] for dom in range(self.num_domains)]),dim=0)
-            mixup_text_feature+=torch.unsqueeze(a[:,d],dim=1).expand(-1,512)*torch.cat(([mixup_text_chunk[(dom+d)%self.num_domains][rand_perm] for dom in range(self.num_domains)]),dim=0)
-  
+        mixup_features_all=[]
+        mixup_text_all=[]
+        for i in range(self.num_mixups):
+       
+            a=torch.rand(int(len(all_x)),self.num_domains)
+            sum=torch.sum(a,dim=1,keepdims=True)
+            a=(a*(1)/sum).to("cuda")
+            mixup_features=torch.unsqueeze(a[:,0],dim=1).expand(-1,768)*mixup_features
+            mixup_text_feature=torch.unsqueeze(a[:,0],dim=1).expand(-1,512)*mixup_text_feature
+            for d in range(1,self.num_domains):
+                rand_perm=torch.randperm(bs)
+                mixup_features+=torch.unsqueeze(a[:,d],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[(dom+d)%self.num_domains][rand_perm] for dom in range(self.num_domains)]),dim=0)
+                mixup_text_feature+=torch.unsqueeze(a[:,d],dim=1).expand(-1,512)*torch.cat(([mixup_text_chunk[(dom+d)%self.num_domains][rand_perm] for dom in range(self.num_domains)]),dim=0)
+            mixup_features_all.append(mixup_features)
+            mixup_text_all.append(mixup_text_feature)
+        mixup_features=torch.cat(mixup_features_all,dim=0)
+        mixup_text_feature=torch.cat(mixup_text_all,dim=0)
         
         
         mixup_features=mixup_features @ self.featurizer.visual.proj
@@ -1232,14 +1239,14 @@ class Clip_train_mixup_with_text(Algorithm):
         logits_per_text_mixup = logits_per_image_mixup.t()
         
         labels = torch.tensor(np.arange(len(all_x))).to("cuda")
-        if(self.cnt%400==0):
-            dosnesvis(logits_per_image_mixup,labels,self.cnt)
+        # if(self.cnt%400==0):
+        #     dosnesvis(logits_per_image_mixup,labels,self.cnt)
         loss_i = F.cross_entropy(logits_per_image_mixup, labels)
         loss_t = F.cross_entropy(logits_per_text_mixup, labels)
         loss = (loss_i + loss_t)/2.0
         # mid2_time=time.time()
 
-        loss=loss_ce
+        loss+=loss_ce
 
 
         self.optimizer.zero_grad()

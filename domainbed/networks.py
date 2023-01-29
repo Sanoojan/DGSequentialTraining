@@ -89,6 +89,14 @@ class ResNet(torch.nn.Module):
                 path="domainbed/pretrained/Resnet50/mocov2_resnet50_8xb32-coslr-200e_in1k_20220225-89e03af4.pth"
                 self.network = load_resnet_from_path(path, num_classes=7)
                 self.n_outputs = 2048
+        elif hparams['weight_init']=="BYOL":
+            if hparams['backbone']=="Resnet18":
+                self.network = torchvision.models.resnet18()
+                self.n_outputs = 512
+            else:
+                path="domainbed/pretrained/Resnet50/byol_resnet50_8xb32-accum16-coslr-300e_in1k_20220225-a0daa54a.pth"
+                self.network = load_resnet_from_path(path, num_classes=7)
+                self.n_outputs = 2048
         elif hparams['weight_init']=="kaiming_normal":
             if hparams['backbone']=="Resnet18":
                 self.network = torchvision.models.resnet18()
