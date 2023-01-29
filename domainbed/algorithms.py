@@ -1238,7 +1238,7 @@ class Clip_train_mixup_with_text(Algorithm):
         logits_per_image_mixup=logit_scale * mixup_features @ mixup_text_feature.t()
         logits_per_text_mixup = logits_per_image_mixup.t()
         
-        labels = torch.tensor(np.arange(len(all_x))).to("cuda")
+        labels = torch.tensor(np.arange(len(all_x)*self.num_mixups)).to("cuda")
         # if(self.cnt%400==0):
         #     dosnesvis(logits_per_image_mixup,labels,self.cnt)
         loss_i = F.cross_entropy(logits_per_image_mixup, labels)
