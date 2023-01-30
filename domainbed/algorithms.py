@@ -29,6 +29,11 @@ from domainbed.lib import misc
 from domainbed.lib.misc import (
     random_pairs_of_minibatches, ParamDict, MovingAverage, l2_between_dicts
 )
+try:
+    from transformers import AutoImageProcessor, BeitForImageClassification
+except:
+    AutoImageProcessor=None
+    BeitForImageClassification=None
 
 
 # import matplotlib.pyplot as plt
@@ -128,6 +133,52 @@ class ERM(Algorithm):
     def update(self, minibatches, unlabeled=None):
         all_x = torch.cat([x for x,y in minibatches])
         all_y = torch.cat([y for x,y in minibatches])
+        loss = F.cross_entropy(self.predict(all_x), all_y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        return self.network(x)
+
+
+class ERM_Beit(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_Beit, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+        # self.featurizer = networks.Featurizer(input_shape, self.hparams)
+        # self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network.visual
+        self.featurizer = BeitForImageClassification.from_pretrained("microsoft/beit-base-patch16-224")
+        self.featurizer.classifier = nn.Identity()
+        self.image_processor = AutoImageProcessor.from_pretrained("microsoft/beit-base-patch16-224")
+        # print(self.featurizer)
+        self.classifier = networks.Classifier(
+            768,
+            num_classes,
+            self.hparams['nonlinear_classifier'])
+
+        self.network = nn.Sequential(self.featurizer, self.classifier)
+        # print(self.network)
+        printNetworkParams(self.network)
+        self.optimizer = torch.optim.Adam(
+            self.network.parameters(),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        
+        
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+
         loss = F.cross_entropy(self.predict(all_x), all_y)
 
         self.optimizer.zero_grad()
