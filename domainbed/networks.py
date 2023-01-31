@@ -86,6 +86,7 @@ class ResNet(torch.nn.Module):
                 self.network = torchvision.models.resnet18()
                 self.n_outputs = 512
             else:
+                print("MocoV2 initialized")
                 path="domainbed/pretrained/Resnet50/mocov2_resnet50_8xb32-coslr-200e_in1k_20220225-89e03af4.pth"
                 self.network = load_resnet_from_path(path, num_classes=7)
                 self.n_outputs = 2048
@@ -94,6 +95,7 @@ class ResNet(torch.nn.Module):
                 self.network = torchvision.models.resnet18()
                 self.n_outputs = 512
             else:
+                print("BYOL initialized")
                 path="domainbed/pretrained/Resnet50/byol_resnet50_8xb32-accum16-coslr-300e_in1k_20220225-a0daa54a.pth"
                 self.network = load_resnet_from_path(path, num_classes=7)
                 self.n_outputs = 2048
@@ -545,15 +547,17 @@ def load_dino(model_name,num_classes=0,distilled=False,num_dist_token=0):
 
 def load_resnet_from_path(path, num_classes=0):
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    model = torchvision.models.resnet50(pretrained=True)
+    model = torchvision.models.resnet50(pretrained=False)
     # for p in model.parameters():
     #     p.requires_grad = False
     # model.eval()
     model.to(device)
-    state_dict = torch.load(path, map_location="cpu")
-    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-    # remove `backbone.` prefix induced by multicrop wrapper
-    state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
-    msg = model.load_state_dict(state_dict, strict=False)
+    state_dict = torch.load(path, map_location=device)
+    # print(state_dict.keys())
+    # model.load_state_dict(state_dict.state_dict())
+    # state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+    # # remove `backbone.` prefix induced by multicrop wrapper
+    # state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
+    msg = model.load_state_dict(state_dict["state_dict"],strict=False)
     print('Pretrained weights found at {} and loaded with msg: {}'.format(path, msg))
     return model

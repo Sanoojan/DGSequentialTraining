@@ -30,8 +30,11 @@ from domainbed.lib.misc import (
     random_pairs_of_minibatches, ParamDict, MovingAverage, l2_between_dicts
 )
 try:
-    from transformers import AutoImageProcessor, BeitForImageClassification
+    # from transformers import AutoImageProcessor, BeitForImageClassification
+    from transformers import OFAModel
+    # from transformers.models.ofa.generate import sequence_generator
 except:
+    print("Import error ==============================================================================================")
     AutoImageProcessor=None
     BeitForImageClassification=None
 
@@ -159,6 +162,52 @@ class ERM_Beit(Algorithm):
         self.featurizer.classifier = nn.Identity()
         self.image_processor = AutoImageProcessor.from_pretrained("microsoft/beit-base-patch16-224")
         # print(self.featurizer)
+        self.classifier = networks.Classifier(
+            768,
+            num_classes,
+            self.hparams['nonlinear_classifier'])
+
+        self.network = nn.Sequential(self.featurizer, self.classifier)
+        # print(self.network)
+        printNetworkParams(self.network)
+        self.optimizer = torch.optim.Adam(
+            self.network.parameters(),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        
+        
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+
+        loss = F.cross_entropy(self.predict(all_x), all_y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+        return self.network(x)
+
+class ERM_OFA(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_OFA, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+        # self.featurizer = networks.Featurizer(input_shape, self.hparams)
+        # self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network.visual
+        ckpt_dir="OFA-tiny"
+        self.featurizer = OFAModel.from_pretrained(ckpt_dir, use_cache=True)
+        print(self.featurizer)
+        # self.featurizer.classifier = nn.Identity()
+        # self.image_processor = AutoImageProcessor.from_pretrained("microsoft/beit-base-patch16-224")
         self.classifier = networks.Classifier(
             768,
             num_classes,
