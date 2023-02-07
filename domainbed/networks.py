@@ -558,6 +558,6 @@ def load_resnet_from_path(path, num_classes=0):
     # state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     # # remove `backbone.` prefix induced by multicrop wrapper
     # state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
-    msg = model.load_state_dict(state_dict["state_dict"],strict=False)
+    msg = model.load_state_dict(state_dict["state_dict"],strict=True)
     print('Pretrained weights found at {} and loaded with msg: {}'.format(path, msg))
     return model
