@@ -62,7 +62,7 @@ def _hparams(algorithm, dataset, random_seed):
         _hparam('mlp_dropout', 0.1, lambda r: r.choice([0.0, 0.1]))
     # 
 
-    elif algorithm in ["Clip_domain_mixup_with_text_cascaded","Clip_domain_mixup","Clip_train_mixup_with_text"]:
+    elif algorithm in ["Clip_domain_mixup_with_text_cascaded","Clip_domain_mixup","Clip_train_mixup_with_text","Clip_train_mixup_with_text_only_aug","Clip_train_mixup_with_zero_shot"]:
         _hparam('num_mixups', 3, lambda r: r.choice([1,2,3,4]))
         _hparam('cascaded', False, lambda r: False)
 
