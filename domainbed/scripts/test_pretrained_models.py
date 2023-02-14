@@ -28,7 +28,7 @@ from domainbed import hparams_registry
 from domainbed import algorithms
 from domainbed.lib import misc
 from domainbed.lib.fast_data_loader import InfiniteDataLoader, FastDataLoader
-
+from scipy.linalg import svd
 
 # import matplotlib.pyplot as plt
 # from mpl_toolkits.mplot3d import Axes3D
@@ -187,16 +187,21 @@ if __name__ == "__main__":
     parser.add_argument('--algo_name', type=str, default=None)
     parser.add_argument('--test_robustness', type=bool, default=False)
     parser.add_argument('--accuracy', type=bool, default=False)
-    parser.add_argument('--tsne', type=bool, default=True)
-    parser.add_argument('--dosnes', type=bool, default=True)
+    parser.add_argument('--tsne', type=bool, default=False)
+    parser.add_argument('--dosnes', type=bool, default=False)
+    parser.add_argument('--SVD', type=bool, default=True)
     parser.add_argument('--flatness', type=bool, default=False)
     parser.add_argument('--polar', type=bool, default=False)
+    parser.add_argument('--boundary', type=bool, default=False)
     parser.add_argument('--segmentation', type=bool, default=False)
     parser.add_argument('--confusion_matrix', type=bool, default=False)
     parser.add_argument('--similarity', type=bool, default=False)
     parser.add_argument('--tsneOut_dir', type=str, default="./domainbed/tsneOuts/clip_train")
+    parser.add_argument('--SVDOut_dir', type=str, default="./domainbed/svdOuts/clip_train")
+
     args = parser.parse_args()
     args.tsneOut_dir="./domainbed/tsneOuts/feat_tsne_mix/"+args.dataset+"/"+args.algorithm
+    args.SVDOut_dir="./domainbed/svdOuts/feat_svd_mix/"+args.dataset+"/"+args.algorithm
     heterogeneous_class=False
     if(args.pretrained==None):
         onlyfiles = [f for f in os.listdir(args.output_dir) if os.path.isfile(os.path.join(args.output_dir, f))]
@@ -210,6 +215,7 @@ if __name__ == "__main__":
 
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(args.tsneOut_dir,exist_ok=True)
+    os.makedirs(args.SVDOut_dir,exist_ok=True)
     sys.stdout = misc.Tee(os.path.join(args.output_dir, 'out1.txt'))
     sys.stderr = misc.Tee(os.path.join(args.output_dir, 'err.txt'))
 
@@ -435,85 +441,30 @@ if __name__ == "__main__":
     Features_all=[]
     labels_all=[]
     tokenlabels=[]
+    domainlabels=[]
     for name, loader, weights in evals:
         env_name=name[:4]
+        # if(int(name[3]) not in args.test_envs and  "in" in name ):
+        #     continue
+        # if(int(name[3]) in args.test_envs  and  "out" in name ):
+        #     continue
+        # if(int(name[3]) in args.test_envs ):
+        #     continue
+        if(int(name[3]) not in args.test_envs ):
+            continue
+
         if(args.accuracy):
             acc = misc.accuracy(algorithm, loader, weights, device)
             # print(algo_name,":",name,":",acc)
             results[name+'_acc'] = acc
-        elif(args.similarity):
-            # Tsne
-            if(int(name[3]) not in args.test_envs and  "in" in name):
-                continue
-            if(int(name[3]) in args.test_envs and  "out" in name):
-                continue
-            # print(name)
-            Features,labels=misc.TsneFeatures(algorithm, loader, weights, device,args.output_dir,env_name,algo_name,polar=False)
+        elif(args.similarity or args.tsne or args.polar or args.SVD):
+            Features,labels=misc.TsneFeatures(algorithm, loader, weights, device,args.output_dir,env_name,algo_name,polar=args.polar)
             for i in range(len(labels)):
                 Features_all.append(Features[i])
                 labels_all.append(int(str(labels[i])))
-            # if (env_name[-1] in args.test_envs):
+                domainlabels.append(int(str(env_name[-1]))) # if domain info needed
+                tokenlabels.append("DS") if i<len(labels)/2 else tokenlabels.append("DI")
 
-                
-
-        elif(args.polar):
-            # if(int(name[3]) not in args.test_envs and  "in" in name ):
-            #     continue
-            # if(int(name[3]) in args.test_envs  and  "out" in name ):
-            #     continue
-            # if(int(name[3]) in args.test_envs ):
-            #     continue
-            # if(int(name[3]) not in args.test_envs ):
-            #     continue
-            print(name)
-            Features,labels=misc.TsneFeatures(algorithm, loader, weights, device,args.output_dir,env_name,algo_name,polar=True)
-            
-            with open("tsne/TSVS/records_"+name_conv+"_blk_"+".tsv", "a") as record_file:
-                for i in range(len(labels)):
-                   
-                    Features_all.append(Features[i])
-                    for j in range(len(Features[i])):
-                        
-                        record_file.write(str(Features[i][j]))
-                        record_file.write("\t")
-                    record_file.write("\n")
-         
-            with open("tsne/TSVS/meta_"+name_conv+".tsv", "a") as record_file:
-                for i in range(len(labels)):
-                
-                    labels_all.append(int(str(env_name[-1])+str(labels[i])))
-                    tokenlabels.append("DS") if i<len(labels)/2 else tokenlabels.append("DI")
-                    record_file.write(str(labels[i]))
-                    record_file.write("\n")
-        elif(args.tsne):
-            # if(int(name[3]) not in args.test_envs and  "in" in name ):
-            #     continue
-            # if(int(name[3]) in args.test_envs  and  "out" in name ):
-            #     continue
-            if(int(name[3]) in args.test_envs ):
-                continue
-            # if(int(name[3]) not in args.test_envs ):
-            #     continue
-            print(name)
-            Features,labels=misc.TsneFeatures(algorithm, loader, weights, device,args.output_dir,env_name,algo_name)
-            
-            with open("tsne/TSVS/records_"+name_conv+"_blk_"+".tsv", "a") as record_file:
-                for i in range(len(labels)):
-                    if(labels[i]<3):
-                        Features_all.append(Features[i])
-                        for j in range(len(Features[i])):
-                            
-                            record_file.write(str(Features[i][j]))
-                            record_file.write("\t")
-                        record_file.write("\n")
-         
-            with open("tsne/TSVS/meta_"+name_conv+".tsv", "a") as record_file:
-                for i in range(len(labels)):
-                    if(labels[i]<3):
-                        labels_all.append(int(str(env_name[-1])+str(labels[i])))
-                        tokenlabels.append("DS") if i<len(labels)/2 else tokenlabels.append("DI")
-                        record_file.write(str(labels[i]))
-                        record_file.write("\n")
         elif(args.flatness  and  "in" in name):
             # Computing Flatness (comment gaussian noise with std for random normal scaling)
             
@@ -639,6 +590,8 @@ if __name__ == "__main__":
     algorithm_dict = algorithm.state_dict()
 
     checkpoint_vals = collections.defaultdict(lambda: [])
+
+    # append text features
     if(args.tsne or args.polar):
         if args.polar:
             text_features = algorithm.text_features
@@ -660,6 +613,26 @@ if __name__ == "__main__":
             
              
         visualizeEd(Features_all, labels_all,tokenlabels,name_conv+".jpg",args.tsneOut_dir)
+    elif args.SVD:
+        Features_all=np.array(Features_all)
+        labelscls=np.array(labels_all)
+        # write np array to file
+        np.savetxt(args.SVDOut_dir+name_conv+".csv", Features_all, delimiter=",") # features
+        np.savetxt(args.SVDOut_dir+name_conv+"_labels.csv", labelscls, delimiter=",") # labels
+
+        for i in range(dataset.num_classes):
+            
+            class_features=Features_all[labelscls==i]
+      
+            # find singular values
+            U, S,V= np.linalg.svd(np.array(class_features), full_matrices=True)
+            
+            # plot singular values
+            plt.plot(S)
+        
+            plt.savefig(args.SVDOut_dir+name_conv+str(i)+".jpg")
+
+
 
     elif args.similarity:
         Similarities=[]

@@ -16,7 +16,7 @@
 #             python -m domainbed.scripts.sweep $command\
 #                 --data_dir=/nfs/users/ext_sanoojan.baliah/Sanoojan/DG/data \
 #                 --output_dir=./domainbed/outputs_clip/Deitbase_related_ablations/ERM_Vit_with_clip_mix-0.6/${dataset}/lr-${lr}\
-#                 --command_launcher multi_gpu\
+#                 --command_launcher multi_gpu_0_1\
 #                 --algorithms ERM_Vit_with_clip_mix \
 #                 --single_test_envs \
 #                 --datasets ${dataset} \
@@ -49,25 +49,24 @@
 #     done
 # done
 
-for lr in  0.00005 0.0002
+for lr in  0.000005 
 do
-    for dataset in  DomainNet  
+    for dataset in  PACS VLCS OfficeHome TerraIncognita
     do
-        for init in kaiming_normal trunc_normal gradinit xavier_uniform 
+        for init in clip_full
         do
             for command in delete_incomplete launch
             do
                 python -m domainbed.scripts.sweep $command\
                     --data_dir=/nfs/users/ext_sanoojan.baliah/Sanoojan/DG/data \
-                    --output_dir=./domainbed/outputs_clip/Ablations/Inits-long/ERM/${init}/${dataset}/lr-${lr}\
-                    --command_launcher multi_gpu_10_15\
-                    --algorithms ERM \
+                    --output_dir=./domainbed/outputs_clip/Ablations/Manifold_Mixup/${dataset}/lr-${lr}\
+                    --command_launcher multi_gpu_0_1\
+                    --algorithms Manifold_Mixup \
                     --single_test_envs \
                     --datasets ${dataset} \
                     --n_hparams 1  \
-                    --steps 20000 \
-                    --n_trials 1  \
-                    --hparams """{\"weight_init\":\"${init}\",\"backbone\":\"Resnet50\",\"lr\":${lr}}"""\
+                    --n_trials 3  \
+                    --hparams """{\"weight_init\":\"${init}\",\"backbone\":\"DeitBase\",\"lr\":${lr}}"""\
                     --skip_confirmation  
             done 
         done

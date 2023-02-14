@@ -35,3 +35,4 @@ AttentionVis/
 Confusion_matrices/
 confusion_matrix/
 temp/
+domainbed/svdOuts/*

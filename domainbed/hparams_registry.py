@@ -86,7 +86,7 @@ def _hparams(algorithm, dataset, random_seed):
         _hparam('irm_penalty_anneal_iters', 500,
                 lambda r: int(10**r.uniform(0, 4)))
 
-    elif algorithm == "Mixup":
+    elif algorithm == "Mixup" or algorithm == "Manifold_Mixup":
         _hparam('mixup_alpha', 0.2, lambda r: 10**r.uniform(-1, -1))
 
     elif algorithm == "GroupDRO":

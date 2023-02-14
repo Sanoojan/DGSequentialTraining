@@ -34,7 +34,7 @@ try:
     from transformers import OFAModel
     # from transformers.models.ofa.generate import sequence_generator
 except:
-    print("Import error ==============================================================================================")
+    print("No OFA Model ==============================================")
     AutoImageProcessor=None
     BeitForImageClassification=None
 
@@ -1287,7 +1287,8 @@ class Clip_train_mixup_with_text(Algorithm):
         self.num_domains=num_domains
         self.tot_time=0
         self.mix_time=0
-        self.num_mixups=self.hparams['num_mixups']
+        
+        # self.num_mixups=self.hparams['num_mixups']
         
 
     
@@ -3341,6 +3342,81 @@ class Mixup(Algorithm):
 
             x = lam * xi + (1 - lam) * xj
             predictions = self.predict(x)
+
+            objective += lam * F.cross_entropy(predictions, yi)
+            objective += (1 - lam) * F.cross_entropy(predictions, yj)
+
+        objective /= len(minibatches)
+
+        self.optimizer.zero_grad()
+        objective.backward()
+        self.optimizer.step()
+
+        return {'loss': objective.item()}
+    def predict(self, x):
+        return self.network(x)
+
+
+class Manifold_Mixup(Algorithm):
+    """
+    Mixup of minibatches from different domains
+    https://arxiv.org/pdf/2001.00677.pdf
+    https://arxiv.org/pdf/1912.01805.pdf
+    """
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(Manifold_Mixup, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+        # self.featurizer = networks.Featurizer(input_shape, self.hparams)
+        # self.featurizer = networks.ViT(input_shape, self.hparams,num_classes)
+        # self.featurizer.network.head=nn.Identity()
+        # self.classifier = networks.Classifier(
+        #     self.featurizer.n_outputs,
+        #     num_classes,
+        #     self.hparams['nonlinear_classifier'],init=self.hparams['weight_init'])
+
+        # self.network = nn.Sequential(self.featurizer, self.classifier)
+        # # print(self.network)
+        # printNetworkParams(self.network)
+        # self.optimizer = torch.optim.Adam(
+        #     self.network.parameters(),
+        #     lr=self.hparams["lr"],
+        #     weight_decay=self.hparams['weight_decay']
+        # )
+
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes)
+        self.classifier = networks.Classifier(
+            self.featurizer.n_outputs,
+            num_classes,
+            self.hparams['nonlinear_classifier'],init=self.hparams['weight_init'])
+        self.featurizer.network.head=nn.Identity()
+        
+        self.network = nn.Sequential(self.featurizer, self.classifier)
+        printNetworkParams(self.featurizer)
+        self.optimizer = torch.optim.AdamW(
+            list(self.network.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.Class_names=misc.Class_names
+        # with torch.no_grad():
+        #     text_inputs  = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+        #     self.text_features = self.featurizer.encode_text(text_inputs)
+        self.cnt=0
+        self.num_domains=num_domains
+        self.tot_time=0
+        self.mix_time=0
+        
+
+    def update(self, minibatches, unlabeled=None):
+        objective = 0
+
+        for (xi, yi), (xj, yj) in random_pairs_of_minibatches(minibatches):
+            lam = np.random.beta(self.hparams["mixup_alpha"],
+                                 self.hparams["mixup_alpha"])
+            xi=self.featurizer(xi)
+            xj=self.featurizer(xj)
+            x = lam * xi + (1 - lam) * xj
+            predictions = self.classifier(x)
 
             objective += lam * F.cross_entropy(predictions, yi)
             objective += (1 - lam) * F.cross_entropy(predictions, yj)
