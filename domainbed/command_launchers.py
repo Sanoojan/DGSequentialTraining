@@ -571,7 +571,31 @@ def gpu_launcher_5(commands):
             p.wait()
 
     
+def gpu_launcher_6(commands):
+    """
+    Launch commands on the local machine, using all GPUs in parallel.
+    """
+    print('WARNING: using experimental multi_gpu_launcher.')
+    n_gpus = 1
+    procs_by_gpu = [None]*n_gpus
 
+    while len(commands) > 0:
+        for gpu_idx in range(n_gpus):
+            proc = procs_by_gpu[gpu_idx]
+            if (proc is None) or (proc.poll() is not None):
+                # Nothing is running on this GPU; launch a command.
+                cmd = commands.pop(0)
+                expoo="export"
+                new_proc = subprocess.Popen(
+                    f'CUDA_VISIBLE_DEVICES={gpu_idx+6} {cmd}', shell=True)
+                procs_by_gpu[gpu_idx] = new_proc
+                break
+        time.sleep(1)
+
+    # Wait for the last few tasks to finish before returning
+    for p in procs_by_gpu:
+        if p is not None:
+            p.wait()
 
 
 REGISTRY = {
@@ -598,6 +622,7 @@ REGISTRY = {
     'gpu_0':gpu_launcher_0,
     'gpu_4':gpu_launcher_4,
     'gpu_5':gpu_launcher_5,
+    'gpu_6':gpu_launcher_6,
 }
 
 try:

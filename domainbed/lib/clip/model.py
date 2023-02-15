@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
+import random
 
 
 class Bottleneck(nn.Module):
@@ -209,13 +210,32 @@ class Transformer(nn.Module):
         self.layers = layers
         self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask) for _ in range(layers)])
 
-    def forward(self, x: torch.Tensor,return_attention=False,attentions=[]):
-        if(return_attention):
-            for blk in self.resblocks:
-                x=blk(x,return_attention=return_attention,attentions=attentions)
-            return x
-        else:
-            return self.resblocks(x)
+    def forward(self, x: torch.Tensor,return_attention=False,attentions=[],manifold=False,mixup_weights=None,ndom=3,mix_layer=None,domainwise=True,post=False,rand_perm=None):
+        # if(return_attention):
+        for i,blk in enumerate(self.resblocks):
+           
+            if(manifold and mixup_weights is not None and i==mix_layer and post == False):
+                if(domainwise):
+                    # x shape: (N,B,C)
+                    #rearrange dimensions
+                    x=x.permute(1,0,2) # shape: (B,N,C)
+                    a=mixup_weights # shape: (B,ndom)
+                    tar_shape=[-1,x.shape[1],x.shape[2]]
+        
+                    mixup_features_chunk=torch.chunk(x,chunks=ndom,dim=0) 
+                    x=a[:,0,None,None].expand(tar_shape)*x # shape: (B,N,C)
+                    for d in range(1,ndom):
+                        x+=a[:,d,None,None].expand(tar_shape)*torch.cat(([mixup_features_chunk[(dom+d)%ndom][rand_perm] for dom in range(ndom)]),dim=0)
+                    x=x.permute(1,0,2) # shape: (N,B,C)
+                    x = blk(x,return_attention=return_attention,attentions=attentions)
+                    
+                else:
+                    print("Not implemented")
+                    exit()
+            x=blk(x,return_attention=return_attention,attentions=attentions)
+        return x
+        # else:
+        #     return self.resblocks(x)
 
 
 class VisionTransformer(nn.Module):
@@ -237,7 +257,9 @@ class VisionTransformer(nn.Module):
         self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
         self.attentions=[]
 
-    def forward(self, x: torch.Tensor,return_all_token=False,return_attention=False):
+    def forward(self, x: torch.Tensor,return_all_token=False,return_attention=False,manifold=False,mixup_weights=None,ndom=3,mix_layer=None,domainwise=True,post=False,rand_perm=None):
+        if(mix_layer is None):
+            mix_layer=random.randint(0,self.transformer.layers-1)
         self.attentions=[]
         x = self.conv1(x)  # shape = [*, width, grid, grid]
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
@@ -247,10 +269,13 @@ class VisionTransformer(nn.Module):
         x = self.ln_pre(x)
 
         x = x.permute(1, 0, 2)  # NLD -> LND
-        if(return_attention):
-            x = self.transformer(x,return_attention=return_attention,attentions=self.attentions)
+    
+        if manifold:
+            x = self.transformer(x,return_attention=return_attention,attentions=self.attentions,
+                                 manifold=manifold,mixup_weights=mixup_weights,ndom=ndom,mix_layer=mix_layer,domainwise=domainwise,post=post,rand_perm=rand_perm)
         else:
-            x = self.transformer(x,return_attention=return_attention)
+            x = self.transformer(x,return_attention=return_attention,attentions=self.attentions)
+        
         x = x.permute(1, 0, 2)  # LND -> NLD
         if(return_all_token):
             x = self.ln_post(x)
@@ -361,8 +386,8 @@ class CLIP(nn.Module):
     def dtype(self):
         return self.visual.conv1.weight.dtype
 
-    def encode_image(self, image,return_all_token=False):
-        return self.visual(image.type(self.dtype))
+    def encode_image(self, image,cfg={}):
+        return self.visual(image.type(self.dtype),**cfg)
 
     def encode_text(self, text,no_embed=False,EOS_pos=None):
         if(no_embed==False):
