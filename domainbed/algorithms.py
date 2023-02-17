@@ -1385,6 +1385,88 @@ class Clip_train_mixup_with_text(Algorithm):
         
         return logits_per_image
 
+class Clip_train_feature_mixup_domainwise(Clip_train_mixup_with_text):
+    def update(self, minibatches, unlabeled=None):
+        # start_time=time.time()
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        # print(all_y)
+        image_features = self.featurizer.encode_image(all_x)
+        text_features = self.text_features
+        image_features_n = image_features @ self.featurizer.visual.proj
+        image_features_n = image_features_n / image_features_n.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        logit_scale = self.featurizer.logit_scale.exp()
+        logits_per_image = logit_scale * image_features_n @ text_features.t()
+        loss_ce=F.cross_entropy(logits_per_image, all_y)
+
+        # mid1_time=time.time()
+        mixup_features=torch.clone(image_features)
+        mixup_features_chunk=torch.chunk(mixup_features,chunks=self.num_domains)
+        # mixup_text_feature=torch.index_select(self.text_features, 0, all_y)
+        # mixup_text_chunk=torch.chunk(mixup_text_feature,chunks=self.num_domains)
+        bs=int(len(all_x)/self.num_domains)
+        mixup_features_all=[]
+        # mixup_text_all=[]
+        mixup_labels_all=[[] for i in range(self.num_domains)]
+        a=None
+        for i in range(self.num_mixups):
+            
+            a=torch.rand(int(len(all_x)),self.num_domains)
+            sum=torch.sum(a,dim=1,keepdims=True)
+            a=(a*(1)/sum).to("cuda")
+            mixup_features=torch.unsqueeze(a[:,0],dim=1).expand(-1,768)*mixup_features
+            # mixup_text_feature=torch.unsqueeze(a[:,0],dim=1).expand(-1,512)*mixup_text_feature
+            mixup_labels_all[0].append(all_y)
+            for d in range(1,self.num_domains):
+                rand_perm=torch.randperm(bs)
+                # print(rand_perm)
+                mix_b=torch.cat([torch.index_select(all_y, 0, (rand_perm+(bs*((dom+d)%self.num_domains))).to("cuda") )for dom in range(self.num_domains)],dim=0)
+                mixup_labels_all[d].append(mix_b)
+                mixup_features+=torch.unsqueeze(a[:,d],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[(dom+d)%self.num_domains][rand_perm] for dom in range(self.num_domains)]),dim=0)
+                # mixup_text_feature+=torch.unsqueeze(a[:,d],dim=1).expand(-1,512)*torch.cat(([mixup_text_chunk[(dom+d)%self.num_domains][rand_perm] for dom in range(self.num_domains)]),dim=0)
+            mixup_features_all.append(mixup_features)
+            # mixup_text_all.append(mixup_text_feature)
+        # print(mixup_labels_all)
+        # exit()
+        mixup_features=torch.cat(mixup_features_all,dim=0)
+        # mixup_text_feature=torch.cat(mixup_text_all,dim=0)
+        
+        
+        mixup_features=mixup_features @ self.featurizer.visual.proj
+        mixup_features = mixup_features / mixup_features.norm(dim=1, keepdim=True)
+        # mixup_text_feature = mixup_text_feature / mixup_text_feature.norm(dim=1, keepdim=True)
+    
+        
+        
+        logits_per_image_mixup=logit_scale * mixup_features @ text_features.t()
+        loss_mix=torch.mean(F.cross_entropy(logits_per_image_mixup, all_y,reduction='none')*a[:,0],dim=0)
+        for dom in range(self.num_domains-1):
+                
+            loss_mix+=torch.mean(F.cross_entropy(logits_per_image_mixup, mixup_labels_all[dom][0],reduction='none'),dim=0)
+
+        loss=loss_ce+(1/self.num_domains)*loss_mix
+        # print(loss_ce2)
+        # logits_per_text_mixup = logits_per_image_mixup.t()
+        
+        # labels = torch.tensor(np.arange(len(all_x)*self.num_mixups)).to("cuda")
+        # if(self.cnt%400==0):
+        #     dosnesvis(logits_per_image_mixup,labels,self.cnt)
+        # loss_i = F.cross_entropy(logits_per_image_mixup, labels)
+        # loss_t = F.cross_entropy(logits_per_text_mixup, labels)
+        # loss = (loss_i + loss_t)/2.0
+    
+
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.cnt+=1
+
+        
+    
+        return {'loss': loss.item()}
+
 
 class Clip_train_manifold_mixup_with_text(Clip_train_mixup_with_text):
     """
@@ -1453,16 +1535,7 @@ class Clip_train_manifold_mixup_with_text(Clip_train_mixup_with_text):
         loss.backward()
         self.optimizer.step()
         self.cnt+=1
-        # end_time=time.time()
-        
-        # tot_time=end_time-start_time
-        # mix_time=mid2_time-mid1_time
-        # self.tot_time+=tot_time
-        # self.mix_time+=mix_time
-        # if(self.cnt%100==0):
-        #     print("cnt:",self.cnt)
-        #     print("tot_time:",self.tot_time/self.cnt)
-        #     # print("mix_time:",self.mix_time/self.cnt)
+
         return {'loss': loss.item()}
 
 class Clip_train_mixup_with_zero_shot(Algorithm):
