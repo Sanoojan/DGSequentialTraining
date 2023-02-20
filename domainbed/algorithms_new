@@ -147,6 +147,71 @@ class ERM(Algorithm):
     def predict(self, x):
         return self.network(x)
 
+class Multi_Modal_Mixup_Algorithm(Algorithm):
+    """
+    Super class for multi modal mixup algorithms
+    """
+    
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(Multi_Modal_Mixup_Algorithm, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+
+        self.VISUAL_MIX="No"  # "No", "Input", "Feature" ,"Manifold"
+        self.TEXT_MIX="No"  # "No", "Embedding", "Feature" ,"Manifold"
+        self.DOMAINWISE_MIX=False  
+        self.USE_TEXT=True  # using false will lead to non usage of text # currently Only True is supported
+        self.USE_NAIVE_LOSS=True 
+        self.WEIGHT="Multiple Random" # "Multiple Random", "Single Random", "Single Fixed"
+        self.WEIGHT_MIX= 0.5 # if WEIGHT is "Single Fixed" then this is the weight
+        self.model_update_sep=False # Used to update the model seperately for each loss # due to memory issues
+        
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network
+       
+        printNetworkParams(self.featurizer)
+        self.optimizer = torch.optim.AdamW(
+            list(self.featurizer.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.Class_names=misc.Class_names
+        with torch.no_grad():
+            text_inputs  = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+            self.text_features = self.featurizer.encode_text(text_inputs)
+        self.cnt=0
+        self.num_domains=num_domains
+        self.tot_time=0
+        self.mix_time=0
+        
+        self.num_mixups=1
+
+    def naive_loss_from_text(self, x, y, domain):
+        loss = F.cross_entropy(self.predict(x), y)
+        return loss   
+
+    
+    def update(self, minibatches, unlabeled=None):
+        raise NotImplementedError
+
+
+    def predict(self, x):
+
+        image_features = self.featurizer.encode_image(x)
+        text_features = self.text_features
+        # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
+        image_features = image_features @ self.featurizer.visual.proj
+
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+    
+
+        # cosine similarity as logits
+        logit_scale = self.featurizer.logit_scale.exp()
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        
+        return logits_per_image
 
 class ERM_Beit(Algorithm):
     """
@@ -1281,8 +1346,8 @@ class Clip_train_mixup_with_text(Algorithm):
         )
         self.Class_names=misc.Class_names
         with torch.no_grad():
-            self.text_inputs  = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
-            self.text_features = self.featurizer.encode_text(self.text_inputs)
+            text_inputs  = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+            self.text_features = self.featurizer.encode_text(text_inputs)
         self.cnt=0
         self.num_domains=num_domains
         self.tot_time=0
@@ -1502,7 +1567,7 @@ class Clip_train_manifold_mixup_with_text(Clip_train_mixup_with_text):
             a=(a*(1)/sum).to("cuda")
             mixup_text_feature=torch.unsqueeze(a[:,0],dim=1).expand(-1,512)*mixup_text_feature
             rand_perm=torch.randperm(bs)
-            cfg={'manifold':True,'mixup_weights':a,'ndom':self.num_domains,'mix_layer':1,'domainwise':True,'post':False,'rand_perm':rand_perm}
+            cfg={'manifold':True,'mixup_weights':a,'ndom':self.num_domains,'mix_layer':None,'domainwise':True,'post':False,'rand_perm':rand_perm}
             mixup_features=self.featurizer.encode_image(all_x,cfg=cfg) # find mixed features
             for d in range(1,self.num_domains):
                 mixup_text_feature+=torch.unsqueeze(a[:,d],dim=1).expand(-1,512)*torch.cat(([mixup_text_chunk[(dom+d)%self.num_domains][rand_perm] for dom in range(self.num_domains)]),dim=0)
@@ -1537,169 +1602,6 @@ class Clip_train_manifold_mixup_with_text(Clip_train_mixup_with_text):
         self.cnt+=1
 
         return {'loss': loss.item()}
-
-class Clip_train_multi_modal_manifold_mixup(Clip_train_mixup_with_text):
-    """
-    Empirical Risk Minimization (ERM)
-    """
-    def update(self, minibatches, unlabeled=None):
-        # start_time=time.time()
-        all_x = torch.cat([x for x,y in minibatches])
-        all_y = torch.cat([y for x,y in minibatches])
-        # print(all_y)
-        image_features = self.featurizer.encode_image(all_x)
-        text_features = self.text_features
-
-        image_features = image_features @ self.featurizer.visual.proj
-        image_features = image_features / image_features.norm(dim=1, keepdim=True)
-        text_features = text_features / text_features.norm(dim=1, keepdim=True)
-        logit_scale = self.featurizer.logit_scale.exp()
-        logits_per_image = logit_scale * image_features @ text_features.t()
-        loss_ce=F.cross_entropy(logits_per_image, all_y)
-
-        # mid1_time=time.time()
-     
-        # print("this is working=====================================")
-        # mixup_text_feature=torch.index_select(self.text_features, 0, all_y)
-        
-         
-            
-
-        mixup_text_chunk=torch.chunk(mixup_text_feature,chunks=self.num_domains)
-        bs=int(len(all_x)/self.num_domains)
-        mixup_features_all=[]
-        mixup_text_all=[]
-
-        for i in range(self.num_mixups):
-            a=torch.rand(int(len(all_x)),self.num_domains)
-            sum=torch.sum(a,dim=1,keepdims=True)
-            a=(a*(1)/sum).to("cuda")
-            mixup_text_feature=torch.unsqueeze(a[:,0],dim=1).expand(-1,512)*mixup_text_feature
-            rand_perm=torch.randperm(bs)
-            cfg={'manifold':True,'mixup_weights':a,'ndom':self.num_domains,'mix_layer':None,'domainwise':True,'post':False,'rand_perm':rand_perm}
-            mixup_features=self.featurizer.encode_image(all_x,cfg=cfg) # find mixed features
-            with torch.no_grad():
-                mixup_text_feature = self.featurizer.encode_text(self.text_inputs,cfg=cfg)
-            mixup_features_all.append(mixup_features)
-            mixup_text_all.append(mixup_text_feature)
-
-        mixup_features=torch.cat(mixup_features_all,dim=0)
-        mixup_text_feature=torch.cat(mixup_text_all,dim=0)
-        
-        mixup_features=mixup_features @ self.featurizer.visual.proj
-        mixup_features = mixup_features / mixup_features.norm(dim=1, keepdim=True)
-        mixup_text_feature = mixup_text_feature / mixup_text_feature.norm(dim=1, keepdim=True)
-    
-        
-        logits_per_image_mixup=logit_scale * mixup_features @ mixup_text_feature.t()
-        logits_per_text_mixup = logits_per_image_mixup.t()
-        
-        labels = torch.tensor(np.arange(len(all_x)*self.num_mixups)).to("cuda")
-        # if(self.cnt%400==0):
-        #     dosnesvis(logits_per_image_mixup,labels,self.cnt)
-        loss_i = F.cross_entropy(logits_per_image_mixup, labels)
-        loss_t = F.cross_entropy(logits_per_text_mixup, labels)
-        loss = (loss_i + loss_t)/2.0
-        # mid2_time=time.time()
-
-        loss+=loss_ce
-
-
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-        self.cnt+=1
-
-        return {'loss': loss.item()}
-
-class Clip_train_feature_mixup_clswise(Clip_train_mixup_with_text):
-    """
-    Empirical Risk Minimization (ERM)
-    """
-    def update(self, minibatches, unlabeled=None):
-        # start_time=time.time()
-        all_x = torch.cat([x for x,y in minibatches])
-        all_y = torch.cat([y for x,y in minibatches])
-        # print(all_y)
-        image_features = self.featurizer.encode_image(all_x)
-        text_features = self.text_features
-        image_features_n = image_features @ self.featurizer.visual.proj
-        image_features_n = image_features_n / image_features_n.norm(dim=1, keepdim=True)
-        text_features = text_features / text_features.norm(dim=1, keepdim=True)
-        logit_scale = self.featurizer.logit_scale.exp()
-        logits_per_image = logit_scale * image_features_n @ text_features.t()
-        loss_ce=F.cross_entropy(logits_per_image, all_y)
-
-        # mid1_time=time.time()
-        mixup_features=torch.clone(image_features)
-        mixup_features_chunk=torch.chunk(mixup_features,chunks=self.num_domains)
-        # mixup_text_feature=torch.index_select(self.text_features, 0, all_y)
-        # mixup_text_chunk=torch.chunk(mixup_text_feature,chunks=self.num_domains)
-        bs=int(len(all_x))
-        mixup_features_all=[]
-        # mixup_text_all=[]
-        mixup_labels_all=[[] for i in range(self.num_domains)]
-        a=None
-        a=torch.rand(int(len(all_x)),self.num_domains)
-        sum=torch.sum(a,dim=1,keepdims=True)
-        a=(a*(1)/sum).to("cuda")
-        for i in range(self.num_mixups):
-            
-            a=torch.rand(int(len(all_x)),self.num_domains)
-            sum=torch.sum(a,dim=1,keepdims=True)
-            a=(a*(1)/sum).to("cuda")
-            mixup_features=torch.unsqueeze(a[:,0],dim=1).expand(-1,768)*mixup_features
-            # mixup_text_feature=torch.unsqueeze(a[:,0],dim=1).expand(-1,512)*mixup_text_feature
-            mixup_labels_all[0].append(all_y)
-            for d in range(1,self.num_domains):
-                rand_perm=torch.randperm(bs)
-                # print(rand_perm)
-                mix_b=torch.cat([torch.index_select(all_y, 0, (rand_perm+(bs*((dom+d)%self.num_domains))).to("cuda") )for dom in range(self.num_domains)],dim=0)
-                mixup_labels_all[d].append(mix_b)
-                mixup_features+=torch.unsqueeze(a[:,d],dim=1).expand(-1,768)*torch.cat(([mixup_features_chunk[(dom+d)%self.num_domains][rand_perm] for dom in range(self.num_domains)]),dim=0)
-                # mixup_text_feature+=torch.unsqueeze(a[:,d],dim=1).expand(-1,512)*torch.cat(([mixup_text_chunk[(dom+d)%self.num_domains][rand_perm] for dom in range(self.num_domains)]),dim=0)
-            mixup_features_all.append(mixup_features)
-            # mixup_text_all.append(mixup_text_feature)
-        # print(mixup_labels_all)
-        # exit()
-        mixup_features=torch.cat(mixup_features_all,dim=0)
-        # mixup_text_feature=torch.cat(mixup_text_all,dim=0)
-        
-        
-        mixup_features=mixup_features @ self.featurizer.visual.proj
-        mixup_features = mixup_features / mixup_features.norm(dim=1, keepdim=True)
-        # mixup_text_feature = mixup_text_feature / mixup_text_feature.norm(dim=1, keepdim=True)
-    
-        
-        
-        logits_per_image_mixup=logit_scale * mixup_features @ text_features.t()
-        loss_mix=torch.mean(F.cross_entropy(logits_per_image_mixup, all_y,reduction='none')*a[:,0],dim=0)
-        for dom in range(self.num_domains-1):
-                
-            loss_mix+=torch.mean(F.cross_entropy(logits_per_image_mixup, mixup_labels_all[dom][0],reduction='none'),dim=0)
-
-        loss=loss_ce+(1/self.num_domains)*loss_mix
-        # print(loss_ce2)
-        # logits_per_text_mixup = logits_per_image_mixup.t()
-        
-        # labels = torch.tensor(np.arange(len(all_x)*self.num_mixups)).to("cuda")
-        # if(self.cnt%400==0):
-        #     dosnesvis(logits_per_image_mixup,labels,self.cnt)
-        # loss_i = F.cross_entropy(logits_per_image_mixup, labels)
-        # loss_t = F.cross_entropy(logits_per_text_mixup, labels)
-        # loss = (loss_i + loss_t)/2.0
-    
-
-
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-        self.cnt+=1
-
-        
-    
-        return {'loss': loss.item()}
-
 
 class Clip_train_mixup_with_zero_shot(Algorithm):
     """
