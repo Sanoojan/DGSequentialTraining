@@ -232,7 +232,8 @@ class Transformer(nn.Module):
                 else:
                     print("Not implemented")
                     exit()
-            x=blk(x,return_attention=return_attention,attentions=attentions)
+            else:
+                x=blk(x,return_attention=return_attention,attentions=attentions)
         return x
         # else:
         #     return self.resblocks(x)
