@@ -1275,7 +1275,7 @@ class Clip_train_mixup_with_text(Algorithm):
        
         printNetworkParams(self.featurizer)
         self.optimizer = torch.optim.AdamW(
-            list(self.featurizer.parameters()),
+            list(self.featurizer.visual.parameters()),
             lr=self.hparams["lr"],
             weight_decay=self.hparams['weight_decay']
         )
@@ -3710,6 +3710,64 @@ class Mixup(Algorithm):
     def predict(self, x):
         return self.network(x)
 
+class Mixup_with_text(Algorithm):
+    """
+    Mixup of minibatches from different domains
+    https://arxiv.org/pdf/2001.00677.pdf
+    https://arxiv.org/pdf/1912.01805.pdf
+    """
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(Mixup_with_text, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+        # self.featurizer = networks.Featurizer(input_shape, self.hparams)
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network # clip full
+        self.Class_names=misc.Class_names
+        self.optimizer = torch.optim.AdamW(
+            list(self.featurizer.visual.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        with torch.no_grad():
+            self.text_inputs  = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to("cuda")
+            self.text_features = self.featurizer.encode_text(self.text_inputs)
+
+       
+    def update(self, minibatches, unlabeled=None):
+        objective = 0
+
+        for (xi, yi), (xj, yj) in random_pairs_of_minibatches(minibatches):
+            lam = np.random.beta(self.hparams["mixup_alpha"],
+                                 self.hparams["mixup_alpha"])
+
+            x = lam * xi + (1 - lam) * xj
+            predictions = self.predict(x)
+
+            objective += lam * F.cross_entropy(predictions, yi)
+            objective += (1 - lam) * F.cross_entropy(predictions, yj)
+
+        objective /= len(minibatches)
+
+        self.optimizer.zero_grad()
+        objective.backward()
+        self.optimizer.step()
+
+        return {'loss': objective.item()}
+    def predict(self, x):
+        image_features = self.featurizer.encode_image(x)
+        text_features = self.text_features
+        # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
+        image_features = image_features @ self.featurizer.visual.proj
+
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+    
+
+        # cosine similarity as logits
+        logit_scale = self.featurizer.logit_scale.exp()
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        
+        return logits_per_image
 
 class Manifold_Mixup(Algorithm):
     """
