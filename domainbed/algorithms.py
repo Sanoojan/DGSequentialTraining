@@ -1737,12 +1737,19 @@ class Clip_train_feature_mixup_clswise(Clip_train_mixup_with_text):
         # mixup_text_all=[]
         mixup_labels_all=[[] for i in range(self.num_domains)]
         a=None
+        fixed_weight=True
         
+
         for i in range(self.num_mixups):
-            
-            a=torch.rand(int(len(all_x)),2)
-            sum=torch.sum(a,dim=1,keepdims=True)
-            a=(a*(1)/sum).to("cuda")
+            if fixed_weight:
+                lam = np.random.beta(0.2,0.2)
+                a=torch.tensor([lam,1-lam]).to("cuda")
+                #extend to batch size
+                a=a.expand(bs,2)
+            else:
+                a=torch.rand(int(len(all_x)),2)
+                sum=torch.sum(a,dim=1,keepdims=True)
+                a=(a*(1)/sum).to("cuda")
             mixup_features=torch.unsqueeze(a[:,0],dim=1).expand(-1,768)*mixup_features
             rand_perm=torch.randperm(bs)
             mixup_features+=torch.unsqueeze(a[:,1],dim=1).expand(-1,768)*mixup_features[rand_perm]
