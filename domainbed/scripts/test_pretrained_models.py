@@ -29,12 +29,37 @@ from domainbed import algorithms
 from domainbed.lib import misc
 from domainbed.lib.fast_data_loader import InfiniteDataLoader, FastDataLoader
 from scipy.linalg import svd
-
+import domainbed.lib.clip.clip as clip
 # import matplotlib.pyplot as plt
 # from mpl_toolkits.mplot3d import Axes3D
 
 # from DOSNES import dosnes
+def _merge(alpha, theta_0, theta_1, fishers, fisher_floor=None):
+    if fishers is None:
+        # interpolate between all weights in the checkpoints
+        return {
+            key: (1 - alpha) * theta_0[key] + alpha * theta_1[key]
+            for key in theta_0.keys()
+        }
 
+    fisher_0, fisher_1 = fishers
+
+    theta = {}
+    for key in theta_0.keys():
+        # Make sure that either we have a Fisher for this variable for
+        # both checkpoints or none of the checkpoints. Default to regular
+        # interpolation if no Fisher is found.
+        assert (key in fisher_0) == (key in fisher_1)
+        ones = torch.ones_like(theta_0[key])
+        f_0 = torch.maximum(fisher_0.get(key, ones), fisher_floor * ones)
+        f_1 = torch.maximum(fisher_1.get(key, ones), fisher_floor * ones)
+
+        c_0 = (1 - alpha) * f_0
+        c_1 = alpha * f_1
+
+        theta[key] = (c_0 * theta_0[key] + c_1 * theta_1[key]) / (c_0 + c_1)
+
+    return theta
 
 def load_model(fname):
     
@@ -186,10 +211,10 @@ if __name__ == "__main__":
     parser.add_argument('--pretrained', type=str, default=None)
     parser.add_argument('--algo_name', type=str, default=None)
     parser.add_argument('--test_robustness', type=bool, default=False)
-    parser.add_argument('--accuracy', type=bool, default=False)
+    parser.add_argument('--accuracy', type=bool, default=True)
     parser.add_argument('--tsne', type=bool, default=False)
     parser.add_argument('--dosnes', type=bool, default=False)
-    parser.add_argument('--SVD', type=bool, default=True)
+    parser.add_argument('--SVD', type=bool, default=False)
     parser.add_argument('--flatness', type=bool, default=False)
     parser.add_argument('--polar', type=bool, default=False)
     parser.add_argument('--boundary', type=bool, default=False)
@@ -442,6 +467,19 @@ if __name__ == "__main__":
     labels_all=[]
     tokenlabels=[]
     domainlabels=[]
+    model, preprocess = clip.load('ViT-B/16', device) # zero shot
+    model=model.float()
+    theta_0={k: v.clone() for k, v in model.state_dict().items()}
+    theta_1={k: v.clone() for k, v in algorithm.featurizer.state_dict().items()}
+    assert set(theta_0.keys()) == set(theta_1.keys())
+    alpha=0.4
+    fishers=None
+    theta = _merge(alpha, theta_0, theta_1, fishers)
+
+        # update the model (in-place) acccording to the new weights
+        
+    algorithm.featurizer.load_state_dict(theta)
+ 
     for name, loader, weights in evals:
         env_name=name[:4]
         # if(int(name[3]) not in args.test_envs and  "in" in name ):
@@ -450,10 +488,12 @@ if __name__ == "__main__":
         #     continue
         # if(int(name[3]) in args.test_envs ):
         #     continue
-        if(int(name[3]) not in args.test_envs ):
-            continue
+        # if(int(name[3]) not in args.test_envs ):
+        #     continue
 
         if(args.accuracy):
+
+            
             acc = misc.accuracy(algorithm, loader, weights, device)
             # print(algo_name,":",name,":",acc)
             results[name+'_acc'] = acc
