@@ -4,33 +4,21 @@
 # do
 
 # TerraIncognita VLCS
-for dataset in VLCS
+for dataset in VLCS PACS OfficeHome TerraIncognita DomainNet
 do
-    CUDA_VISIBLE_DEVICES=2 python -m domainbed.scripts.test_sweep launch\
-        --data_dir=/share/data/drive_2/DG/data \
-        --output_dir=./domainbed/outputs_clip/Clip_train_mixup_with_text_ft_uniform/${dataset}/lr-0.000005 \
-        --command_launcher multi_gpu\
-        --algorithms Clip_train_mixup_with_text\
-        --single_test_envs \
-        --datasets ${dataset} \
-        --n_hparams 1  \
-        --n_trials 1 \
-        --skip_confirmation \
-        --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
+    # CUDA_VISIBLE_DEVICES=0 python -m domainbed.scripts.test_sweep launch\
+    #     --data_dir=/share/data/drive_2/DG/data \
+    #     --output_dir=./domainbed/outputs_clip/Clip_train_mixup_with_text_ft_uniform/${dataset}/lr-0.000005 \
+    #     --command_launcher multi_gpu\
+    #     --algorithms Clip_train_mixup_with_text\
+    #     --single_test_envs \
+    #     --datasets ${dataset} \
+    #     --n_hparams 1  \
+    #     --n_trials 3 \
+    #     --skip_confirmation \
+    #     --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""\
 
-    CUDA_VISIBLE_DEVICES=2 python -m domainbed.scripts.test_sweep launch\
-        --data_dir=/share/data/drive_2/DG/data \
-        --output_dir=./domainbed/outputs_clip/Clip_zero_shot/${dataset}\
-        --command_launcher multi_gpu\
-        --algorithms clip_zero_shot \
-        --single_test_envs \
-        --datasets ${dataset} \
-        --n_hparams 1  \
-        --n_trials 1 \
-        --skip_confirmation \
-        --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\"}"""\ 
-
-    CUDA_VISIBLE_DEVICES=2 python -m domainbed.scripts.test_sweep launch\
+    CUDA_VISIBLE_DEVICES=0 python -m domainbed.scripts.test_sweep launch\
         --data_dir=/share/data/drive_2/DG/data \
         --output_dir=./domainbed/outputs_clip/Clip_train/${dataset}/lr-0.000005 \
         --command_launcher multi_gpu\
@@ -38,9 +26,23 @@ do
         --single_test_envs \
         --datasets ${dataset} \
         --n_hparams 1  \
-        --n_trials 1 \
+        --n_trials 3 \
         --skip_confirmation \
         --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\",\"lr\":0.000005,\"batch_size\":32}"""
+
+    CUDA_VISIBLE_DEVICES=0 python -m domainbed.scripts.test_sweep launch\
+        --data_dir=/share/data/drive_2/DG/data \
+        --output_dir=./domainbed/outputs_clip/Clip_zero_shot/${dataset}\
+        --command_launcher multi_gpu\
+        --algorithms clip_zero_shot \
+        --single_test_envs \
+        --datasets ${dataset} \
+        --n_hparams 1  \
+        --n_trials 3 \
+        --skip_confirmation \
+        --hparams """{\"weight_init\":\"clip_full\",\"backbone\":\"DeitBase\"}"""\ 
+
+    
 done
 
 
