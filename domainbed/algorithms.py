@@ -1565,7 +1565,8 @@ class Clip_train_feature_mixup_domainwise_text_mix_cls(Clip_train_mixup_with_tex
     
 class Clip_train_feature_mixup_domainwise_text_mix_cls_randomW(Clip_train_mixup_with_text):
     def update(self, minibatches, unlabeled=None):
-        text_mix_num=2 # now only support 2
+        # start_time=time.time()
+        lam = np.random.beta(0.2,0.2)
         all_x = torch.cat([x for x,y in minibatches])
         all_y = torch.cat([y for x,y in minibatches])
         # print(all_y)
@@ -1578,7 +1579,7 @@ class Clip_train_feature_mixup_domainwise_text_mix_cls_randomW(Clip_train_mixup_
         logits_per_image = logit_scale * image_features_n @ text_features.t()
         loss_ce=F.cross_entropy(logits_per_image, all_y)
 
-    
+        # mid1_time=time.time()
         mixup_features=torch.clone(image_features)
         mixup_features_chunk=torch.chunk(mixup_features,chunks=self.num_domains)
         # mixup_text_feature=torch.index_select(self.text_features, 0, all_y)
@@ -1615,31 +1616,29 @@ class Clip_train_feature_mixup_domainwise_text_mix_cls_randomW(Clip_train_mixup_
         mixup_features = mixup_features / mixup_features.norm(dim=1, keepdim=True)
         # mixup_text_feature = mixup_text_feature / mixup_text_feature.norm(dim=1, keepdim=True)
 
-        cs=int(len(self.Class_names))
+        bs=int(len(self.Class_names))
         
-        b=torch.rand(cs,text_mix_num)
-        sum=torch.sum(b,dim=1,keepdims=True)
-        b=(b*(1)/sum).to("cuda")
-        text_mix_feature=torch.unsqueeze(b[:,0],dim=1).expand(-1,512)*text_features
-        for i in range(1,text_mix_num):
-            rand_perm=torch.randperm(bs)
-            text_mix_feature+=torch.unsqueeze(b[:,i],dim=1).expand(-1,512)*text_features[rand_perm]
-        
+        rand_perm=torch.randperm(bs)
+        # mixed_labels=rand_perm[all_y.to("cpu")].to("cuda")
 
+        text_mix_feature=lam*text_features+(1-lam)*text_features[rand_perm]
+
+        
+        # logits_per_image_mixup=logit_scale * image_features_n @ text_mix_feature.t()
+        # loss_mix=torch.mean(F.cross_entropy(logits_per_image_mixup, all_y,reduction='none')*0.5,dim=0)    
+        # loss_mix+=torch.mean(F.cross_entropy(logits_per_image_mixup, mixed_labels,reduction='none')*0.5,dim=0)
+
+        # loss=loss_ce+(1/2.0)*loss_mix
+
+        
         
         logits_per_image_mixup=logit_scale * mixup_features @ text_mix_feature.t()
-        # select weights from b according to mixup_labels_all
-        
-
-
-        loss_mix=0.5*torch.mean(F.cross_entropy(logits_per_image_mixup, all_y,reduction='none')*a[:,0]*torch.index_select(b[:,0],0,all_y),dim=0)
-        loss_mix+=0.5*torch.mean(F.cross_entropy(logits_per_image_mixup, rand_perm[all_y.to("cpu")].to("cuda"),reduction='none')*a[:,0]*torch.index_select(b[:,1],0,all_y),dim=0)
+        loss_mix=lam*torch.mean(F.cross_entropy(logits_per_image_mixup, all_y,reduction='none')*a[:,0],dim=0)
+        loss_mix+=(1-lam)*torch.mean(F.cross_entropy(logits_per_image_mixup, rand_perm[all_y.to("cpu")].to("cuda"),reduction='none')*a[:,0],dim=0)
         for dom in range(1,self.num_domains):
                 
-            loss_mix+=0.5*torch.mean(F.cross_entropy(logits_per_image_mixup, mixup_labels_all[dom][0],reduction='none')*a[:,dom],dim=0)
-            loss_mix+=0.5*torch.mean(F.cross_entropy(logits_per_image_mixup, rand_perm[mixup_labels_all[dom][0].to("cpu")].to("cuda"),reduction='none')*a[:,dom],dim=0)
-        
-        
+            loss_mix+=lam*torch.mean(F.cross_entropy(logits_per_image_mixup, mixup_labels_all[dom][0],reduction='none')*a[:,dom],dim=0)
+            loss_mix+=(1-lam)*torch.mean(F.cross_entropy(logits_per_image_mixup, rand_perm[mixup_labels_all[dom][0].to("cpu")].to("cuda"),reduction='none')*a[:,dom],dim=0)
         loss=loss_ce+(1/self.num_domains)*loss_mix
         # print(loss_ce2)
         # logits_per_text_mixup = logits_per_image_mixup.t()
