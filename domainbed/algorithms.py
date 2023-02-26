@@ -3871,6 +3871,96 @@ class Mixup_with_text(Algorithm):
         
         return logits_per_image
 
+class Input_Mixup_with_text_mix(Mixup_with_text):
+    """
+    Mixup of minibatches from different domains
+    https://arxiv.org/pdf/2001.00677.pdf
+    https://arxiv.org/pdf/1912.01805.pdf
+    """
+    
+       
+    def update(self, minibatches, unlabeled=None):
+        objective = 0
+
+        for (xi, yi), (xj, yj) in random_pairs_of_minibatches(minibatches):
+            # lam = np.random.beta(self.hparams["mixup_alpha"],
+            #                      self.hparams["mixup_alpha"])
+            lam=0.5
+            x = lam * xi + (1 - lam) * xj
+            # get yi,yj tuples
+            # convert the tensors to CPU tensors and then to Python lists
+            yi_list = yi.cpu().tolist()
+            yj_list = yj.cpu().tolist()
+
+            # zip the two lists and create a list of tuples
+            result = list(zip(yi_list, yj_list))
+
+            # convert the list of tuples to a set of tuples to remove duplicates
+            unique_tuples = set(result)
+
+            # convert the set of tuples back to a list of tuples
+            unique_tuples_list = list(unique_tuples)
+
+            
+            # get indexes of  labels in unique labels
+            indexes = [unique_tuples_list.index(tuple) for tuple in result]
+
+            indexes = torch.tensor(indexes).to("cuda")
+
+            # print("index:",indexes)
+            with torch.no_grad():
+                #make text inputs for unique labels
+               
+
+                text_inputs  = torch.cat([tokenize(f"a photo of a {self.Class_names[c1]} and {self.Class_names[c2]}") for c1,c2 in unique_tuples_list]).to("cuda")
+                text_features = self.featurizer.encode_text(text_inputs)
+
+            predictions = self.predict_train(x,text_features)
+            objective = F.cross_entropy(predictions, indexes)
+            # objective += lam * F.cross_entropy(predictions, yi)
+            # objective += (1 - lam) * F.cross_entropy(predictions, yj)
+
+        objective /= len(minibatches)
+
+        self.optimizer.zero_grad()
+        objective.backward()
+        self.optimizer.step()
+
+        return {'loss': objective.item()}
+    
+    def predict_train(self, x,text_features):
+        image_features = self.featurizer.encode_image(x)
+        # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
+        image_features = image_features @ self.featurizer.visual.proj
+
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+    
+
+        # cosine similarity as logits
+        logit_scale = self.featurizer.logit_scale.exp()
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        
+        return logits_per_image
+
+    def predict(self, x):
+        image_features = self.featurizer.encode_image(x)
+        text_features = self.text_features
+        # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
+        image_features = image_features @ self.featurizer.visual.proj
+
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+    
+
+        # cosine similarity as logits
+        logit_scale = self.featurizer.logit_scale.exp()
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        
+        return logits_per_image
+
 class Manifold_Mixup(Algorithm):
     """
     Mixup of minibatches from different domains
