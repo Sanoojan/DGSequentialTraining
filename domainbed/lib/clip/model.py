@@ -259,7 +259,7 @@ class VisionTransformer(nn.Module):
         self.attentions=[]
 
     def forward(self, x: torch.Tensor,cnt=0,return_all_token=False,return_attention=False,manifold=False,mixup_weights=None,ndom=3,mix_layer=None,domainwise=True,post=False,rand_perm=None):
-        print("forward visual cnt:",cnt)
+        # print("forward visual cnt:",cnt)
         time_start=time.time()
         if(mix_layer is None):
             mix_layer=random.randint(0,self.transformer.layers-1)
@@ -287,7 +287,7 @@ class VisionTransformer(nn.Module):
         # if self.proj is not None:
         #     x = x @ self.proj
         
-        print("forward visual cnt end:",cnt,";time:",time.time()-time_start)
+        # print("forward visual cnt end:",cnt,";time:",time.time()-time_start)
         if(return_attention):
             return x,self.attentions
         return x
@@ -395,7 +395,7 @@ class CLIP(nn.Module):
         return self.visual(image.type(self.dtype),cnt=cnt,**cfg)
 
     def encode_text(self, text,cnt=0,no_embed=False,EOS_pos=None,cfg={}):
-        print("forward text cnt:",cnt)
+        # print("forward text cnt:",cnt)
         start_time=time.time()
         if(no_embed==False):
             x = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
@@ -415,7 +415,7 @@ class CLIP(nn.Module):
         # x.shape = [batch_size, n_ctx, transformer.width]
         # take features from the eot embedding (eot_token is the highest number in each sequence)
         x = x[torch.arange(x.shape[0]), EOS_pos] @ self.text_projection 
-        print("forward text cnt end:",cnt,";time:",time.time()-start_time)
+        # print("forward text cnt end:",cnt,";time:",time.time()-start_time)
         return x
 
     def forward(self, image, text):

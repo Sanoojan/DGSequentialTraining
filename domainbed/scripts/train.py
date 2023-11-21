@@ -224,7 +224,7 @@ if __name__ == "__main__":
         for key, val in step_vals.items():
             checkpoint_vals[key].append(val)
 
-        if (step % checkpoint_freq == 0) or (step == n_steps - 1) and step > 0:
+        if ((step % checkpoint_freq == 0) or (step == n_steps - 1) )and step > 0:
             results = {
                 'step': step,
                 'epoch': step / steps_per_epoch,

@@ -21,7 +21,7 @@ try:
     from backpack.extensions import BatchGrad
 except:
     backpack = None
-    
+import wandb
 from concurrent.futures import ThreadPoolExecutor, wait
 
 from domainbed.lib.visiontransformer import *
@@ -335,6 +335,8 @@ class Clip_train(Algorithm):
         all_x = torch.cat([x for x,y in minibatches])
         all_y = torch.cat([y for x,y in minibatches])
         # with torch.no_grad():
+        
+        time_start=time.time()
        
         image_features = self.featurizer.encode_image(all_x)
       
@@ -345,9 +347,15 @@ class Clip_train(Algorithm):
 
         logits_per_image = logit_scale * image_features @ text_features.t()
         loss=F.cross_entropy(logits_per_image, all_y)
+        wandb.log({"forward_time":time.time()-time_start})
+        time_start=time.time()
+        
         self.optimizer.zero_grad()
         loss.backward()
+        wandb.log({"backward_time":time.time()-time_start})
         self.optimizer.step()
+        time_start=time.time()
+        wandb.log({"update_time":time.time()-time_start})
         self.cnt+=1
         return {'loss': loss.item()}
 
@@ -369,6 +377,108 @@ class Clip_train(Algorithm):
         logits_per_image = logit_scale * image_features @ text_features.t()
         
         return logits_per_image
+
+class Clip_train_No_distributed(Algorithm):
+    """
+    Empirical Risk Minimization (ERM)
+    """
+
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(Clip_train_No_distributed, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+
+        device_0 = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # device_1 = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        # breakpoint()
+        self.featurizer = networks.ViT(input_shape, self.hparams,num_classes).network.to(device_0)
+        self.featurizer.visual.to(device_0)
+        
+        # self.text_featurizer=self.featurizer.text.to(device_1)
+        # breakpoint()
+        if(self.hparams['weight_init']=="clip_full"):
+            print("clip_full")
+            # self.featurizer.network.proj=None
+
+        printNetworkParams(self.featurizer)
+        self.optimizer = torch.optim.AdamW(
+            list(self.featurizer.parameters()),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+        self.Class_names=misc.Class_names
+        self.text_inputs  = torch.cat([tokenize(f"a photo of a {c}") for c in self.Class_names]).to(device_0)
+        
+        # breakpoint()
+        # print(self.Class_names)
+        self.cnt=0
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        # with torch.no_grad():
+        
+        # with ThreadPoolExecutor() as executor:
+        #     futures = []
+        #     futures.append(executor.submit(train, dense, dummy1, 1000))
+        #     futures.append(executor.submit(train, rest, dummy2, 1000))
+        #     complete_futures, incomplete_futures = wait(futures)
+        #     for f in complete_futures:
+        #         output.append(f.result())
+        #         print(str(f.result()))
+
+        # elapsed = (time.time() - start_time)
+        # print(f"Total time of execution {round(elapsed, 4)} second(s)")
+        # print("Output is:",output)
+
+        # print(self.cnt)
+        
+        time_start=time.time()
+        
+        text_features = self.featurizer.encode_text(self.text_inputs,cnt=self.cnt)
+        image_features = self.featurizer.encode_image(all_x,cnt=self.cnt)
+      
+        image_features = image_features @ self.featurizer.visual.proj
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+        logit_scale = self.featurizer.logit_scale.exp()
+
+
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        loss=F.cross_entropy(logits_per_image, all_y)
+        wandb.log({"forward_time":time.time()-time_start})
+        # print("time_forward:cnt",self.cnt,":",time.time()-time_start)
+        time_start=time.time()
+        self.optimizer.zero_grad()
+        loss.backward()
+        wandb.log({"backward_time":time.time()-time_start})
+        time_start=time.time()
+        # print("time_backward:cnt",self.cnt,":",time.time()-time_start)
+        self.optimizer.step()
+        wandb.log({"update_time":time.time()-time_start})
+        self.cnt+=1
+        return {'loss': loss.item()}
+
+    def predict(self, x):
+ 
+        
+        image_features = self.featurizer.encode_image(x)
+        
+        # text_features = text_features[torch.arange(text_features.shape[0]), text_inputs.argmax(dim=-1)] @ self.network.text_projection
+        image_features = image_features @ self.featurizer.visual.proj
+        text_features = self.featurizer.encode_text(self.text_inputs)
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=1, keepdim=True)
+    
+
+        # cosine similarity as logits
+        logit_scale = self.featurizer.logit_scale.exp()
+        logit_scale = logit_scale.to("cuda:0")
+        text_features=text_features.to("cuda:0")
+        logits_per_image = logit_scale * image_features @ text_features.t()
+        
+        return logits_per_image
+
 
 
 class Clip_train_distributed(Algorithm):
@@ -424,7 +534,9 @@ class Clip_train_distributed(Algorithm):
         # print(f"Total time of execution {round(elapsed, 4)} second(s)")
         # print("Output is:",output)
 
+        # print(self.cnt)
         
+        time_start=time.time()
         
         text_features = self.featurizer.encode_text(self.text_inputs,cnt=self.cnt)
         image_features = self.featurizer.encode_image(all_x,cnt=self.cnt)
@@ -439,9 +551,16 @@ class Clip_train_distributed(Algorithm):
         
         logits_per_image = logit_scale * image_features @ text_features.t()
         loss=F.cross_entropy(logits_per_image, all_y)
+        wandb.log({"forward_time":time.time()-time_start})
+        # print("time_forward:cnt",self.cnt,":",time.time()-time_start)
+        time_start=time.time()
         self.optimizer.zero_grad()
         loss.backward()
+        wandb.log({"backward_time":time.time()-time_start})
+        time_start=time.time()
+        # print("time_backward:cnt",self.cnt,":",time.time()-time_start)
         self.optimizer.step()
+        wandb.log({"update_time":time.time()-time_start})
         self.cnt+=1
         return {'loss': loss.item()}
 
@@ -464,6 +583,9 @@ class Clip_train_distributed(Algorithm):
         logits_per_image = logit_scale * image_features @ text_features.t()
         
         return logits_per_image
+    
+    
+
 
 class Clip_train_distributed_async(Algorithm):
     """
@@ -508,7 +630,7 @@ class Clip_train_distributed_async(Algorithm):
         def exec(model,x,cnt):
             ret=model(x,cnt=cnt)
             return ret
-        
+        time_start=time.time()
         with ThreadPoolExecutor() as executor:
             futures = []
             futures.append(executor.submit(exec, self.featurizer.encode_text, self.text_inputs,self.cnt))
@@ -534,9 +656,15 @@ class Clip_train_distributed_async(Algorithm):
         
         logits_per_image = logit_scale * image_features @ text_features.t()
         loss=F.cross_entropy(logits_per_image, all_y)
+        wandb.log({"forward_time":time.time()-time_start})
+        time_start=time.time()
+        
         self.optimizer.zero_grad()
         loss.backward()
+        wandb.log({"backward_time":time.time()-time_start})
+        time_start=time.time()
         self.optimizer.step()
+        wandb.log({"update_time":time.time()-time_start})
         self.cnt+=1
         return {'loss': loss.item()}
 

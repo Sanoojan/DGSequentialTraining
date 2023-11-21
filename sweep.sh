@@ -1,5 +1,5 @@
 CUDA_VISIBLE_DEVICES=0,1 python -m domainbed.scripts.train\
-    --algorithm Clip_train_distributed\
+    --algorithm Clip_train_distributed_async\
     --data_dir /home/sanoojan.baliah/project/dataset/DG/ \
     --dataset TerraIncognita\
     --holdout_fraction 0.2\
