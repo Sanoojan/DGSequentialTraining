@@ -75,6 +75,7 @@ class Job:
         for job in tqdm.tqdm(jobs, leave=False):
             os.makedirs(job.output_dir, exist_ok=True)
         commands = [job.command_str for job in jobs]
+
         launcher_fn(commands)
         print(f'Launched {len(jobs)} jobs!')
 
@@ -174,7 +175,7 @@ if __name__ == "__main__":
     jobs = [Job(train_args, args.output_dir) for train_args in args_list]
 
     for job in jobs:
-        print(job)
+        print(job.command_str)
     print("{} jobs: {} done, {} incomplete, {} not launched.".format(
         len(jobs),
         len([j for j in jobs if j.state == Job.DONE]),

@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 import random
-
+import time
 
 class Bottleneck(nn.Module):
     expansion = 4
@@ -258,7 +258,9 @@ class VisionTransformer(nn.Module):
         self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
         self.attentions=[]
 
-    def forward(self, x: torch.Tensor,return_all_token=False,return_attention=False,manifold=False,mixup_weights=None,ndom=3,mix_layer=None,domainwise=True,post=False,rand_perm=None):
+    def forward(self, x: torch.Tensor,cnt=0,return_all_token=False,return_attention=False,manifold=False,mixup_weights=None,ndom=3,mix_layer=None,domainwise=True,post=False,rand_perm=None):
+        print("forward visual cnt:",cnt)
+        time_start=time.time()
         if(mix_layer is None):
             mix_layer=random.randint(0,self.transformer.layers-1)
         self.attentions=[]
@@ -284,6 +286,8 @@ class VisionTransformer(nn.Module):
             x = self.ln_post(x[:, 0, :])
         # if self.proj is not None:
         #     x = x @ self.proj
+        
+        print("forward visual cnt end:",cnt,";time:",time.time()-time_start)
         if(return_attention):
             return x,self.attentions
         return x
@@ -387,10 +391,12 @@ class CLIP(nn.Module):
     def dtype(self):
         return self.visual.conv1.weight.dtype
 
-    def encode_image(self, image,cfg={}):
-        return self.visual(image.type(self.dtype),**cfg)
+    def encode_image(self, image,cnt=0,cfg={}):
+        return self.visual(image.type(self.dtype),cnt=cnt,**cfg)
 
-    def encode_text(self, text,no_embed=False,EOS_pos=None,cfg={}):
+    def encode_text(self, text,cnt=0,no_embed=False,EOS_pos=None,cfg={}):
+        print("forward text cnt:",cnt)
+        start_time=time.time()
         if(no_embed==False):
             x = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
             # print("text",text.shape)
@@ -409,10 +415,11 @@ class CLIP(nn.Module):
         # x.shape = [batch_size, n_ctx, transformer.width]
         # take features from the eot embedding (eot_token is the highest number in each sequence)
         x = x[torch.arange(x.shape[0]), EOS_pos] @ self.text_projection 
-
+        print("forward text cnt end:",cnt,";time:",time.time()-start_time)
         return x
 
     def forward(self, image, text):
+        
         image_features = self.encode_image(image) @ self.visual.proj
         text_features = self.encode_text(text)
 

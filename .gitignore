@@ -36,3 +36,5 @@ Confusion_matrices/
 confusion_matrix/
 temp/
 domainbed/svdOuts/*
+wandb/*
+domainbed/misc/*

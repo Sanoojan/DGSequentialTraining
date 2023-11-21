@@ -1,4 +1,4 @@
-name: dgbed
+name: dgbed2
 channels:
   - pytorch
   - conda-forge
@@ -114,13 +114,9 @@ dependencies:
     - seaborn==0.11.2
     - threadpoolctl==2.2.0
     - tifffile==2022.4.22
-    - torch==1.9.0+cu111
-    - torchaudio==0.9.0
-    - torchmetrics==0.8.0
-    - torchvision==0.10.0
     - tqdm==4.62.0
     - typing-extensions==3.10.0.0
     - urllib3==1.26.6
     - vit-pytorch==0.27.0
     - wilds==1.2.2
-prefix: /share/softwares/anaconda/anaconda3/envs/dgbed
+

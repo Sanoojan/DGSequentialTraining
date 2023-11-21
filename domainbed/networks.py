@@ -266,16 +266,19 @@ class ViT(torch.nn.Module):
                 # model=model.float()
                 self.network=model.float()
                 self.n_outputs = 768
-                # self.network.proj=nn.Parameter(0.03608439182435161 * torch.randn(768, num_classes))
-                # self.network.proj==None
+
             elif hparams['backbone']=="Resnet50":
                 device = "cuda" if torch.cuda.is_available() else "cpu"
                 model, preprocess = clip.load('RN50', device)
                 # model=model.float()
                 self.network=model.float()
                 self.n_outputs = 1024
-                # self.network.proj=nn.Parameter(0.03608439182435161 * torch.randn(768, num_classes))
-                # self.network.proj==None
+            if hparams['backbone']=="Large":
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                model, preprocess = clip.load('ViT-L/14', device)
+                # model=model.float()
+                self.network=model.float()
+                self.n_outputs = 768
             else:
                 raise NotImplementedError     
         elif hparams['weight_init']=="clip_scratch":
@@ -390,69 +393,6 @@ class ViT(torch.nn.Module):
                 m.eval()
 
 
-class MNIST_CNN(nn.Module):
-    """
-    Hand-tuned architecture for MNIST.
-    Weirdness I've noticed so far with this architecture:
-    - adding a linear layer after the mean-pool in features hurts
-        RotatedMNIST-100 generalization severely.
-    """
-    n_outputs = 128
-
-    def __init__(self, input_shape):
-        super(MNIST_CNN, self).__init__()
-        self.conv1 = nn.Conv2d(input_shape[0], 64, 3, 1, padding=1)
-        self.conv2 = nn.Conv2d(64, 128, 3, stride=2, padding=1)
-        self.conv3 = nn.Conv2d(128, 128, 3, 1, padding=1)
-        self.conv4 = nn.Conv2d(128, 128, 3, 1, padding=1)
-
-        self.bn0 = nn.GroupNorm(8, 64)
-        self.bn1 = nn.GroupNorm(8, 128)
-        self.bn2 = nn.GroupNorm(8, 128)
-        self.bn3 = nn.GroupNorm(8, 128)
-
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-
-    def forward(self, x):
-        x = self.conv1(x)
-        x = F.relu(x)
-        x = self.bn0(x)
-
-        x = self.conv2(x)
-        x = F.relu(x)
-        x = self.bn1(x)
-
-        x = self.conv3(x)
-        x = F.relu(x)
-        x = self.bn2(x)
-
-        x = self.conv4(x)
-        x = F.relu(x)
-        x = self.bn3(x)
-
-        x = self.avgpool(x)
-        x = x.view(len(x), -1)
-        return x
-
-
-class ContextNet(nn.Module):
-    def __init__(self, input_shape):
-        super(ContextNet, self).__init__()
-
-        # Keep same dimensions
-        padding = (5 - 1) // 2
-        self.context_net = nn.Sequential(
-            nn.Conv2d(input_shape[0], 64, 5, padding=padding),
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, 5, padding=padding),
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.Conv2d(64, 1, 5, padding=padding),
-        )
-
-    def forward(self, x):
-        return self.context_net(x)
 
 
 def Featurizer(input_shape, hparams):
@@ -500,25 +440,7 @@ def Classifier(in_features, out_features, is_nonlinear=False,init=None):
         return lin
 
 
-class WholeFish(nn.Module):
-    def __init__(self, input_shape, num_classes, hparams, weights=None):
-        super(WholeFish, self).__init__()
-        featurizer = Featurizer(input_shape, hparams)
-        classifier = Classifier(
-            featurizer.n_outputs,
-            num_classes,
-            hparams['nonlinear_classifier'])
-        self.net = nn.Sequential(
-            featurizer, classifier
-        )
-        if weights is not None:
-            self.load_state_dict(copy.deepcopy(weights))
 
-    def reset_weights(self, weights):
-        self.load_state_dict(copy.deepcopy(weights))
-
-    def forward(self, x):
-        return self.net(x)
 
 def load_dino(model_name,num_classes=0,distilled=False,num_dist_token=0):
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")

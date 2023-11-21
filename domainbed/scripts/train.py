@@ -9,7 +9,7 @@ import sys
 import time
 import copy
 import uuid
-
+import wandb
 import numpy as np
 import PIL
 import torch
@@ -47,12 +47,9 @@ if __name__ == "__main__":
     parser.add_argument('--holdout_fraction', type=float, default=0.2)
     parser.add_argument('--uda_holdout_fraction', type=float, default=0,
         help="For domain adaptation, % of test to use unlabeled for training.")
-    parser.add_argument('--skip_model_save', action='store_true')
-    parser.add_argument('--save_model_every_checkpoint', action='store_true')
-    parser.add_argument('--save_best_model', action='store_true')
+    parser.add_argument('--wandbname', type=str, default="test")
     args = parser.parse_args()
-    heterogeneous_class=False
-    args.save_best_model=True
+
     # If we ever want to implement checkpointing, just persist these values
     # every once in a while, and then load them from disk here.
     start_step = 0
@@ -76,12 +73,6 @@ if __name__ == "__main__":
     for k, v in sorted(vars(args).items()):
         print('\t{}: {}'.format(k, v))
     
-    
-    if(args.algorithm)=="zero_shot_eval":
-        zero_shot=True
-    else:
-        zero_shot=False
-    # zero_shot=True
 
     if args.hparams_seed == 0:
         hparams = hparams_registry.default_hparams(args.algorithm, args.dataset)
@@ -102,7 +93,7 @@ if __name__ == "__main__":
     torch.backends.cudnn.benchmark = False
 
     if torch.cuda.is_available():
-        device = "cuda"
+        device = torch.device("cuda:0")
     else:
         device = "cpu"
 
@@ -112,44 +103,13 @@ if __name__ == "__main__":
         misc.Class_names=dataset.Class_names
         num_classes=dataset.num_classes
         misc.Train_class_names=misc.Class_names
-        if(heterogeneous_class):
-            num_select_cls=num_classes//2
-            classes_ind=list(range(num_classes))
-            select_classes=random.sample(classes_ind, num_select_cls)
-            eval_classes=list(set(classes_ind) - set(select_classes))
-            in_weights_sp = torch.tensor([1.0/(num_select_cls) if i in select_classes else 0 for i in classes_ind  ]).to("cuda")
-            out_weights_sp = torch.tensor([1.0/(num_classes-num_select_cls) if i in eval_classes else 0 for i in classes_ind  ]).to("cuda")
-            eval_weight_sp=[]
-            misc.Train_class_names=[misc.Class_names[i] for i in sorted(select_classes)]
-            misc.Test_class_names=[misc.Class_names[i] for i in sorted(select_classes)]
-            k=[]
-            vl=0
-            for i in range(num_classes):
-                if(i in select_classes):
-                    k.append(vl)
-                    vl+=1
-                else:
-                    k.append(-1)
-            misc.class_change=torch.tensor(k) 
-            # print(Train_class_names)
-            # in_weights_sp = torch.tensor([1.0/(num_select_cls) for i in classes_ind ]).to("cuda")
-            print("train_classes:",select_classes)
-            print("eval_classes:",eval_classes)
+        
+
     else:
         raise NotImplementedError
 
-    # Split each env into an 'in-split' and an 'out-split'. We'll train on
-    # each in-split except the test envs, and evaluate on all splits.
-
-    # To allow unsupervised domain adaptation experiments, we split each test
-    # env into 'in-split', 'uda-split' and 'out-split'. The 'in-split' is used
-    # by collect_results.py to compute classification accuracies.  The
-    # 'out-split' is used by the Oracle model selectino method. The unlabeled
-    # samples in 'uda-split' are passed to the algorithm at training time if
-    # args.task == "domain_adaptation". If we are interested in comparing
-    # domain generalization and domain adaptation results, then domain
-    # generalization algorithms should create the same 'uda-splits', which will
-    # be discared at training.
+    
+    
     in_splits = []
     out_splits = []
     uda_splits = []
@@ -165,29 +125,8 @@ if __name__ == "__main__":
             uda, in_ = misc.split_dataset(in_,
                 int(len(in_)*args.uda_holdout_fraction),
                 misc.seed_hash(args.trial_seed, env_i))
-        if(heterogeneous_class):
-     
-            Classes=[y for _,y in in_]
-            Classes=torch.tensor(Classes).to("cuda")
-            if (env_i in args.test_envs):
-                eval_weight_sp.append(out_weights_sp)
-                in_weights=torch.index_select(in_weights_sp, 0, Classes)
-                in_weights=in_weights/torch.sum(in_weights)
-            else:
-                eval_weight_sp.append(in_weights_sp)
-                in_weights=torch.index_select(in_weights_sp, 0, Classes)
-                in_weights=in_weights/torch.sum(in_weights)
-                
-            if (env_i in args.test_envs):
-                out_weights=torch.index_select(in_weights_sp, 0, Classes)
-                out_weights=out_weights/torch.sum(in_weights)
-            else:
-                out_weights=torch.index_select(in_weights_sp, 0, Classes)
-                out_weights=out_weights/torch.sum(in_weights)
-
-            if uda is not None:
-                uda_weights = misc.make_weights_for_balanced_classes(uda)
-        elif hparams['class_balanced']:
+        
+        if hparams['class_balanced']:
             in_weights = misc.make_weights_for_balanced_classes(in_)
     
             out_weights = misc.make_weights_for_balanced_classes(out)
@@ -239,7 +178,7 @@ if __name__ == "__main__":
     if algorithm_dict is not None:
         algorithm.load_state_dict(algorithm_dict)
 
-    algorithm.to(device)
+    # algorithm.to(device)
 
     train_minibatches_iterator = zip(*train_loaders)
     uda_minibatches_iterator = zip(*uda_loaders)
@@ -250,92 +189,19 @@ if __name__ == "__main__":
     n_steps = args.steps or dataset.N_STEPS
     checkpoint_freq = args.checkpoint_freq or dataset.CHECKPOINT_FREQ
 
-    def save_checkpoint(filename):
-        if args.skip_model_save:
-            return
-        save_dict = {
-            "args": vars(args),
-            "model_input_shape": dataset.input_shape,
-            "model_num_classes": dataset.num_classes,
-            "model_num_domains": len(dataset) - len(args.test_envs),
-            "model_hparams": hparams,
-            "model_dict": algorithm.state_dict()
-        }
-        torch.save(save_dict, os.path.join(args.output_dir, filename))
-
-    def save_checkpoint_best(filename,algo):
-        if args.skip_model_save:
-            return
-        save_dict = {
-            "args": vars(args),
-            "model_input_shape": dataset.input_shape,
-            "model_num_classes": dataset.num_classes,
-            "model_num_domains": len(dataset) - len(args.test_envs),
-            "model_hparams": hparams,
-            "model_dict": algo.state_dict()
-        }
-        torch.save(save_dict, os.path.join(args.output_dir, filename))
 
     last_results_keys = None
     start_time=time.time()
     best_val_acc=0
 
-    if (zero_shot):
-        print("zero_shot")
-        step_start_time = time.time()
-        minibatches_device = [(x.to(device), y.to(device))
-            for x,y in next(train_minibatches_iterator)]
-        if args.task == "domain_adaptation":
-            uda_device = [x.to(device)
-                for x,_ in next(uda_minibatches_iterator)]
-        else:
-            uda_device = None
-        # step_vals = algorithm.update(minibatches_device, uda_device)
-        checkpoint_vals['step_time'].append(time.time() - step_start_time)
-
-        # for key, val in step_vals.items():
-        #     checkpoint_vals[key].append(val)
-        step=0
-        if (step % checkpoint_freq == 0) or (step == n_steps - 1):
-            results = {
-                'step': step,
-                'epoch': step / steps_per_epoch,
-            }
-
-            for key, val in checkpoint_vals.items():
-                results[key] = np.mean(val)
-
-            evals = zip(eval_loader_names, eval_loaders, eval_weights)
-            for name, loader, weights in evals:
-                acc = misc.accuracy(algorithm, loader, weights, device)
-                results[name+'_acc'] = acc
-            
-            results['mem_gb'] = torch.cuda.max_memory_allocated() / (1024.*1024.*1024.)
-
-            results_keys = sorted(results.keys())
-            if results_keys != last_results_keys:
-                misc.print_row(results_keys, colwidth=12)
-                last_results_keys = results_keys
-            misc.print_row([results[key] for key in results_keys],
-                colwidth=12)
-       
-            results.update({
-                'hparams': hparams,
-                'args': vars(args)
-            })
-
-            epochs_path = os.path.join(args.output_dir, 'results.jsonl')
-            with open(epochs_path, 'a') as f:
-                f.write(json.dumps(results, sort_keys=True) + "\n")
-
-            start_step = step + 1
-            checkpoint_vals = collections.defaultdict(lambda: [])
-            stop_time=time.time()
-            print("Time taken to train: ",str((stop_time-start_time)/60.0)," minutes")
-            with open(os.path.join(args.output_dir, 'done'), 'w') as f:
-                f.write('done')
-        exit()
-
+    
+    wandb.init(
+    # set the wandb project where this run will be logged
+        project=args.wandbname,
+        
+        # track hyperparameters and run metadata
+        config=hparams,
+    )
 
     for step in range(start_step, n_steps):
         step_start_time = time.time()
@@ -348,11 +214,17 @@ if __name__ == "__main__":
             uda_device = None
         step_vals = algorithm.update(minibatches_device, uda_device)
         checkpoint_vals['step_time'].append(time.time() - step_start_time)
-
+        
+        wandb_log=step_vals.copy()
+        wandb_log['step_time']=time.time() - step_start_time
+        wandb_log['step']=step
+        wandb_log['curr_time']=time.time()-start_time
+        wandb.log(wandb_log)
+        
         for key, val in step_vals.items():
             checkpoint_vals[key].append(val)
 
-        if (step % checkpoint_freq == 0) or (step == n_steps - 1):
+        if (step % checkpoint_freq == 0) or (step == n_steps - 1) and step > 0:
             results = {
                 'step': step,
                 'epoch': step / steps_per_epoch,
@@ -366,29 +238,19 @@ if __name__ == "__main__":
             temp_count=0
             for name, loader, weights in evals:
                 acc = misc.accuracy(algorithm, loader, weights, device)
-                if(args.save_best_model):
-                    if (int(name[3]) not in args.test_envs and  "out" in name):
-                        curr_train_env=name[3]
-                        temp_acc+=acc
-                        temp_count+=1
-                
                 results[name+'_acc'] = acc
 
             results['mem_gb'] = torch.cuda.max_memory_allocated() / (1024.*1024.*1024.)
-
+            
+            wandb_eval_log=results.copy()
+            wandb.log(wandb_eval_log)
+            
             results_keys = sorted(results.keys())
             if results_keys != last_results_keys:
                 misc.print_row(results_keys, colwidth=12)
                 last_results_keys = results_keys
             misc.print_row([results[key] for key in results_keys],
                 colwidth=12)
-            if(args.save_best_model):
-                val_acc=temp_acc/(temp_count*1.0)   
-                if(val_acc>=best_val_acc):
-                    model_save=copy.deepcopy(algorithm)  #clone
-                    best_val_acc=val_acc
-                    savename= 'best_val_model_testdom_'+str(args.test_envs)+"_{:.4f}".format(val_acc)+'.pkl'
-                    print("Best model upto now")
 
             results.update({
                 'hparams': hparams,
@@ -403,12 +265,8 @@ if __name__ == "__main__":
             start_step = step + 1
             checkpoint_vals = collections.defaultdict(lambda: [])
 
-            if args.save_model_every_checkpoint:
-                save_checkpoint(f'model_step{step}.pkl')
+  
     stop_time=time.time()           
     print("Time taken to train: ",str((stop_time-start_time)/60.0)," minutes")
-    # save_checkpoint('model.pkl')
-    if(args.save_best_model):
-        save_checkpoint_best(savename,model_save)
     with open(os.path.join(args.output_dir, 'done'), 'w') as f:
         f.write('done')
